@@ -4465,3 +4465,47 @@ System.out.println("the max result of s4 is " + maxResult.get());
     * 当调用者使用过程中，发生数据改变，而调用者需要对数据一致性
       有较高要求，用Collection。Collection可以实时观测数据的变化，流的使用过程中数据一般不会变，相当于数据是一个快照，流运行时的数据变更是反映不出来最新的数据
 
+
+
+# (9)Java模块化
+
+## Java模块化概述
+
+* JDK8及以前开发模式
+  * Java源代码以Java文件（类/接口/注解等）的形式编写
+  * 每个Java文件被明确地放入到一个包中
+  * Java文件编译后的class文件，可以压缩为jar包，供别的程序调用
+  * 一个程序可以使用类库，类库通常以jar包呈现
+  * 将所有程序jar包，类库jar包，都放在classpath上，来运行程序
+  * 以Jar为中心
+* Jar Hell
+  * jar文件无法控制别人访问其内部的public的类
+  * 无法控制不同jar包中， 相同的类名（包名+类名）
+  * Java运行时， 无法判定classpath路径上的jar中有多少个不同版本的文件。Java加载第一个符合名字的类
+    * 例如，Main. class需要p1. Foo类，而classpath. 上有foo-1.0. jar和foo-2.0.jar。 当Main运行时，将按照c lasspath顺序，加载第一个jar(1.0)的文件，而忽略后面正确的jar(2.0)里面的文件。
+  * Java运行时，无法预判classpath路径上是否缺失了一些关键类
+* 模块化必须遵循的三个原则
+  * 强封装性：一个模块必须能够对其他模块隐藏其部分代码。（jar无法对外隐藏内部的public类）
+  * 定义良好的接口：模块必须向其他模块公开定义良好且稳定的接口。
+  * 显式依赖：明确一个模块需要哪些模块的支持才能完成工作。
+* Java 9开始引入新的模块化系统：Jigsaw 拼图
+  * 以**模块**(module)为中心
+  * 对JDK本身进行模块化（JDK拆散，应用不用加载JDK所有的部分）
+  * 提供一个应用程序可以使用的模块系统
+  * 优点
+    * 可靠的配置
+    * 强封装性
+    * 可扩展开发
+    * 安全性
+    * 性能优化
+  * <img src="E:\Typora\MyNotes\java_03_advanced\java_advanced.assets\image-20221030230647475.png" alt="image-20221030230647475" style="zoom:80%;" />
+    加锁部分不能访问
+  * <img src="E:\Typora\MyNotes\java_03_advanced\java_advanced.assets\image-20221030230735463.png" alt="image-20221030230735463" style="zoom:80%;" />
+    没有循环依赖
+* 以Java 11.0.1为例
+  * 共有71个模块
+  * 最底层的是java.base（默认直接引用）
+  * 每个模块都有明确的依赖模块，不存在循环依赖、双向依赖
+  * 使用java --list-modules可以查看JDK的模块列表（需JDK9及以上，推荐11）
+  * 每个类都自动引用java.base模块
+  * 使用java --describe-module查看平台模块声明
