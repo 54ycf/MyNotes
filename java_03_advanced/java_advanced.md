@@ -4498,9 +4498,9 @@ System.out.println("the max result of s4 is " + maxResult.get());
     * 可扩展开发
     * 安全性
     * 性能优化
-  * <img src="E:\Typora\MyNotes\java_03_advanced\java_advanced.assets\image-20221030230647475.png" alt="image-20221030230647475" style="zoom:80%;" />
+  * <img src="java_advanced.assets\image-20221030230647475.png" alt="image-20221030230647475" style="zoom:80%;" />
     加锁部分不能访问
-  * <img src="E:\Typora\MyNotes\java_03_advanced\java_advanced.assets\image-20221030230735463.png" alt="image-20221030230735463" style="zoom:80%;" />
+  * <img src="java_advanced.assets\image-20221030230735463.png" alt="image-20221030230735463" style="zoom:80%;" />
     没有循环依赖
 * 以Java 11.0.1为例
   * 共有71个模块
