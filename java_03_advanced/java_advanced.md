@@ -4509,3 +4509,118 @@ System.out.println("the max result of s4 is " + maxResult.get());
   * 使用java --list-modules可以查看JDK的模块列表（需JDK9及以上，推荐11）
   * 每个类都自动引用java.base模块
   * 使用java --describe-module查看平台模块声明
+
+
+
+## 模块创建和运行
+
+* Java Jigsaw
+
+  * 自Java9推出，以模块为中心
+  * 在模块中，仍以包-类文件结构存在，在包类结构上加如模块
+  * 每个模块中， 都有一个module-info.java
+    * 描述了这个模块依赖哪些其他的模块，输出本模块中哪些内容
+      module java. prefs {
+      	requires java. xml;
+      	exports java.util.prefs ;
+      }
+
+* 命令行创建Module
+
+  * 新建一个项目主目录，如F:\temp\JavaModuleTest
+
+  * 创建src目录（放java）, modules 目录（放class）， lib 目录（放jar）
+
+  * 在src下面建立一个目录module.hello（模块名字，可自由定，注意java保留字）
+
+  * 在module.hello目录下，建立cn\hello包目录，再建立HelloWorld.java
+
+    ~~~java
+    package cn.hello;
+    
+    public class HelloWorld {
+    
+    	public static void main(String[] args) {
+    		Class<HelloWorld> cls = HelloWorld.class;
+            Module module = cls.getModule();
+            String moduleName = module.getName();
+            System.out.println("Module Name: " + moduleName);
+    	}
+        public void print(){
+    		System.out.println("Hello java module");
+    	}
+    
+    }
+    ~~~
+
+  * 在module.hello目录下，建立一个module-info.java
+
+    ~~~java
+    module module.hello {
+        requires java.base; //默认依赖，不写也可
+    	//输出给别人使用
+    	exports cn.hello;
+    }
+    ~~~
+
+  * 编译/运行/打包
+
+  * 进入根目录（F:\temp\JavaModuleTest），对模块进行编译
+
+    ~~~sh
+    javac -d --module-source-path src src\module.hello\module-info.java src\module.hello\cn\hello\HelloWorld.java
+    ~~~
+
+    此时根目录下生成modules文件夹，里面存放module.hello，之中存放module-info.class和编译好的包结构的class文件
+
+  * 将class文件打包成jar文件
+
+    ~~~sh
+    jar --create --file libs\module.hello-1.0.jar --main-class cn.hello.HelloWorld -C modules/module.hello
+    ~~~
+
+    此时libs文件夹下生成jar包
+
+  * 运行
+
+    ~~~sh
+    java --module-path libs\module.hello-1.0.jar --module module.hello
+    # 输出 Module Name:  module.hello
+    ~~~
+
+  * 链接jlink（JDK9引入），制作自定义运行时映像(custom runtime image)
+
+    * 舍弃无用庞大的JDK库（将class和JDK底层类库抽取出来）
+    * 适合在容器中快速部署运行
+
+  * ~~~sh
+    jlink --module-path modules --add-modules module.hello --launcher hello=module.hello/cn.hello.HelloWorld --output module-hello-image
+    # --launcher是主入口点 hello名字是我们自己定义的，是整个映像执行程序的名字，hello=后的类是我们的主入口点
+    ~~~
+
+    根目录下生成一个module-hello-image的文件夹，其中的bin目录下有一个hello.bat文件，将HelloWorld.class打包成可以独立运行的文件，可以单独执行，达到exe效果
+
+* Eclipse创建Module
+
+  * 新建一个JavaProject项目主目录
+    * 可以在创建的时候，直接选择创建module-info.java
+    * 或者选中项目，右键configure选择Create module-info.java
+  * 创建cn.hello.HelloWorld.java
+    * 可以选择在默认src目录下，在这个目录下再新建module-info.java
+    * 或者可以新建一个source folder， 取名module.hello（默认的src目录没有名字就叫src，不直观），再创建包结构和类文件
+  * 修改module-info.java
+  * 编译/运行/打包
+
+* 模块的依赖
+
+  * export
+  * Eclipse中，Properties---Java Build Path---Modulepath里需要添加模块依赖
+
+* Java Module和Maven Multi Module不一样，那是开发的程序编排方式，对编译没有影响
+
+* 使用JDK9+，不强制创建JavaModule，即不创建module-info.java
+
+* Module的命名是由module-info.java来控制
+
+  * requires
+  * exports
