@@ -4624,3 +4624,44 @@ System.out.println("the max result of s4 is " + maxResult.get());
 
   * requires
   * exports
+
+
+
+# 模块信息文件
+
+* module-info.java
+  * 模块安全控制的核心
+  * 是模块和外界沟通的总负责
+  * 名字和内容组成
+  * 模块名字（通常用**.**来表示）
+    * 模块名称必须唯一
+    * 可以不和包名相同
+    * 使用有代表性的词语
+    * 不需要包括版本号（在编译打包的时候可以规定版本号）
+* requires调用其他的模块
+  * java --list-modules查看系统提供的模块
+  * java --describe-module看某一个模块
+  * requires可以添加多个，中间逗号隔开
+  * 单纯requires，模块依赖不会传递，即调用module.hello不会自动调用java.xml
+    * <img src="java_advanced.assets/image-20221101235324882.png" alt="image-20221101235324882" style="zoom:80%;" />
+  * 采用requires transitive达到依赖传递的功能
+  * 请注意requires public，JDK11发布时已过时
+  * java.se本身就是个聚合模块，一个不含代码，只包含其他模块的模块。嗲用一个聚合模块就可以调用很多歌单个模块
+    * <img src="java_advanced.assets/image-20221101235303182.png" alt="image-20221101235303182" style="zoom:80%;" />
+  * requires N，编译和运行都依赖于N
+  * requires transitive N，编译和运行都传递依赖于N
+  * requires staticN，编译依赖于N，运行可选可要可不要，通常用到注解上，注解只在编译有用，实际运行加载不到
+  * requires transitive static N，编译传递依赖于N，运行可选
+* exports将当前模块输出
+  * 只有输出，别人才能使用
+  * exports可以指定某些包输出
+    * exports <package\>
+  * 限定输出到特定的模块使用
+    * exports <package\> to <module1\>, <module2\>;
+* opens将当前模块开放用于反射
+  * exports导出的包的public部分可以反射来访问，其他权限修饰的内容和未
+    导出的内容无法反射（setAcessible(true)也无效）
+  * opens可以打开一些包，其他模块可以反射调用这些包及内容
+  * open module打开整个模块
+  * 打开一个包：opens <package\>
+  * 仅对某些模块打开一个包：opens <package\> to <module1\>,<module\2>
