@@ -4665,3 +4665,121 @@ System.out.println("the max result of s4 is " + maxResult.get());
   * open module打开整个模块
   * 打开一个包：opens <package\>
   * 仅对某些模块打开一个包：opens <package\> to <module1\>,<module\2>
+
+
+
+## 服务
+
+* 传统对象的创建方法带来耦合
+
+~~~java
+public interface Shoe {
+	public void walk();
+}
+public class DoubleStar implements Shoe {
+	public void walk() {
+		System.out.println("DoubleStar is walking");		
+	}
+}
+public class ShoeTest { //ShoeTest需要import DoubleStart、Shoe，以上三类紧密耦合
+	public static void main(String[] args) {
+		Shoe obj = new DoubleStar();//new DoubleStart转型为借口
+		obj.walk();
+	}
+}
+~~~
+
+* 采用工厂模式解耦对象创建
+
+~~~java
+public class ShoeFactory {
+	public static Shoe getShoe(String name) {
+		Shoe result = null;
+		if ("DoubleStar".equals(name)) {
+			result = new DoubleStar();
+		} else {
+			result = new Warrior();
+		}
+		return result;
+	}
+}
+public class Test {
+	public static void main(String[] args) {
+		Shoe obj = ShoeFactory.getShoe("Warrior");//换鞋只需要修改字符串
+		obj.walk();
+	}
+}
+~~~
+
+* 服务
+
+  * Java 模块系统引入的新功能，实现解耦（模块系统里两个类相互调用且两个类分别位于不同的模块里面，则俩模块就有依赖关系）
+  * 模块对外**只暴露接口**，隐藏实现类
+  * provides提供接口，with实现类（不导出）
+  * uses消费接口
+
+  ~~~java
+  module module.first {
+  	exports first.p1;
+  //	provides first.p1.Shoe //对外公开接口
+  //		with first.p2.DoubleStar,first.p2.Warrior; //公开内部实现类
+  	
+  	provides first.p1.Shoe 
+  	with first.p1.ShoeFactory;
+  }
+  
+  module module.second {
+  	requires module.first;	//依赖模块
+  	uses first.p1.Shoe;	//使用接口
+  }
+  ~~~
+
+  * ServiceLoader通过load加载接口的实现类（with语句提供）
+  * 每次load，默认情况下都会产生新的各自独享的实例，没有唯一的服务实例。每个模块去调用同一个模块里面的同一个接口，产生的实例是分开的，变量不冲突。
+  * 可以调用reload进行刷新
+
+  ~~~java
+  public class ShoeTest {
+  	public static void main(String[] args){
+  		Iterable<Shoe> objs = ServiceLoader.load(Shoe.class);
+  		for(Shoe obj:objs){
+  			obj.walk();
+  			System.out.println(obj.hashCode());
+  		}
+  		
+  		//每次load，都产生新的实例
+  		objs = ServiceLoader.load(Shoe.class);
+  		for(Shoe obj:objs){
+  			obj.walk();
+  			System.out.println(obj.hashCode());
+  		}
+  		
+  	//	Iterable<Shoe> objs = Shoe.getA1();
+  	//	System.out.println("aaaaaa");
+  	//	for(Shoe obj:objs){
+  	//		obj.print();
+  	//		System.out.println(obj.getClass().getName());
+  	//	}
+  	//	System.out.println("bbbbbbbbbbb");
+  	}
+  }
+  ~~~
+
+* Java模块系统提供两种方法创建服务实例
+
+  * 直接provides with语句创建，条件是服务实现类有public的无参构造函数
+  * 使用单独的静态提供者方法
+    * 一个名为provider的public static无参数方法，调用这个方法来产生出一个服务实现类的实例
+    * 返回服务接口或子类
+
+  ~~~java
+  public class ShoeFactory {
+  	public static Shoe provider() {
+  		Shoe result = new DoubleStar();
+  		return result;
+  	}
+  }
+  //这个方法需对外暴露
+  ~~~
+
+  
