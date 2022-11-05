@@ -4625,9 +4625,7 @@ System.out.println("the max result of s4 is " + maxResult.get());
   * requires
   * exports
 
-
-
-# 模块信息文件
+## 模块信息文件
 
 * module-info.java
   * 模块安全控制的核心
@@ -4782,4 +4780,44 @@ public class Test {
   //这个方法需对外暴露
   ~~~
 
-  
+
+
+
+## Java模块化应用
+
+* 传统的Java开发
+  * package+public/ protected/ default/ private机制
+  * jar文件，压缩分发的作用
+  * 优点：简单，中小型程序适用
+  * 缺点
+    * 过于简单，难以适应复杂的权限要求，
+    * 程序员可以随意访问和控制代码（pulic直接访问，反射把private都能访问）
+* Java模块化系统（Java 9+）
+  * 从根源上对JDK进行模块化，降低最终程序运行时负载
+  * 在jar层上增加一个module机制
+  * 引入exports/ requires/ opens明确模块边界和依赖关系，程序
+    更隐私安全
+  * 引入服务provides/ uses使得程序更解耦
+  * jlink制作运行时映像，使运维更高效
+* 向Java模块化系统迁移的制约因素（截止课程2020）
+  * Java模块化系统尚未成熟，存在较多变化
+    * 只有11是LTS, 9/10/12/13均是STS
+  * Java9+JDK版权收费，很多程序员和厂商还是使用Java8
+  * 已有的庞大的第三方库，基本不是基于模块开发的，完全融入或使用模块重新开发有困难
+  * 构建工具和开发工具IDE尚未大力支持
+* 已有的模块系统OSGi
+  * OSGi, Open Service Gateway Initiative, https://www.osgi.org/（Eclipse基于此开发）
+  * 在OSGi容器里面运行bundle，通过类加载器来控制类的可见性
+* Java模块化 vs OSGi
+  * Java更偏源头控制，从JDK开始分模块开发和部署
+  * OSGi更偏动态性控制，对bundle进行全生命周期控制
+  * Java模块化更年轻，尚未成熟，OSGi已经发展多年，更完整.
+  * 两者互相借鉴和互操作
+  * https://www.infoq.com/articles/java9-osgi-future-modularity
+* 网站
+  * http://openjdk.java.net/projects/jigsaw/
+  * https://docs.oracle.com/en/java/javase/11/docs/apijava.base/java/lang/module/package-summary.html
+  * https://docs.oracle.com/en/java/javase/11/
+* 书籍
+  * 《Java 9模块化开发核心原则与实践》，Sander Mak, Paul Bakker著，王净 等译，Oreilly&机械工业出版社
+  * 《The Java Modular System》，Nicolai Parlog著，Manning出版社

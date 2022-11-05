@@ -328,3 +328,21 @@
   * put(key,value):仅当key不在数据库中时，将kv对添加到数据库中。否则，将使用新版本更新存储的value。注意，即使更新存储的value中的一部分也需要替换整个value。 
   * delete(key): 删除key 及其关联的value(s)
   * 这些操作依赖一致性模型和索引。执行时可通过REST或Lucene接口访问
+* K-V数据库代表
+  * Redis, Riak KV, Oracle NoSQL, Hyperdex(2012), Yahoo Pnuts (2008), Oracle Berkeley DB和 Project Voldemort
+
+## Column Family
+
+* Column Family 数据模型
+  * 以表的形式存储数据，表有行（row）和列（ column ）
+    * column 是数据库中最小的存储单元，它是一个带时间戳的key-value 对。
+  * 每一个row 也是一个key-value 对，表示一个高度结构化的数据项，row key是该row数据的唯一标示，value 是一个column的集合。
+  * column family由任意数量的column构成，这些column在逻辑上相互关联，通常一起访问
+    * Row和column确定为一个cell，每个cell存储同一份数据的多个版本，用时间戳来区分
+    * 时间戳：用来区分数据版本的索引。
+  * 访问控制、磁盘和内存使用统计在column family层面, column family的模式灵活，可以在运行时添加或删除其中的列
+
+<img src="NoSQL.assets/image-20221103090818974.png" alt="image-20221103090818974" style="zoom:80%;" />
+
+* Column Family存储实例
+  * 
