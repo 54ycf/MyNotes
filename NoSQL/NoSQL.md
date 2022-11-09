@@ -345,4 +345,192 @@
 <img src="NoSQL.assets/image-20221103090818974.png" alt="image-20221103090818974" style="zoom:80%;" />
 
 * Column Family存储实例
-  * 
+  * 通过三元组 <row-key, column-key, timestamp\>检索cell的value
+  * Column family数据库中的数据可以有效地进行水平（按行）和垂直（按列族）分区，使得它们适合存储大数据集
+    <img src="NoSQL.assets/image-20221109183126186.png" alt="image-20221109183126186" style="zoom:80%;" />
+* Column family 嵌套结构
+  * 一些column family数据库提供*aggregate* (或embedded/nested）数据结构，允许一个column-family嵌套在其他column-families中。（如Apache Cassandra）
+  * column family数据库支持不同的建模结构，例如row、 column family和nested column-families 。这些结构可用于根据查询工作负载创建*aggregate*层次结构，从而通过访问collocated数据来提高查询性能
+* 基于Column family存储的查询案例
+  * Facebook针对收件箱搜索服务，采用Column family数据模型组织数据（包含aggregate）提供服务：用户基于关键字或发件人/收件人的名字查询发送和接收的邮件
+  * <img src="NoSQL.assets/image-20221109184122663.png" alt="image-20221109184122663" style="zoom:80%;" />
+  * 通过创建不同的聚合，可以简化这些查询需求。更确切地，对于关键字和发件人/收件人的名字查询，用户ID是行键。两个Column family：Sent-received和Sender-recipient代表两个不同的聚合（针对同一个用户），分别满足关键字和发件人/收件人的名字查询的要求。对于Sent-received列族，组成用户消息的关键字成为超级列族。对于每个超级列族，单独的消息ID（或消息链接）作为列，从而将冗余最小化。类似地，对于Sender-recipient列族，属于用户消息的所有Sender/recipients的用户id成为超级列族。 对于每个超级列族，单个消息id作为列。这个例子包含两个aggregates
+* 具有存储和分析大数据的优势
+  * Column family数据库中的数据可以有效地水平划分（by *rows* ）和垂直划分（by *column-families*），适于存储大数据集。
+  * <img src="NoSQL.assets/image-20221109184456714.png" alt="image-20221109184456714" style="zoom:80%;" />
+* Column family数据模型的代表
+  * Apache Cassandra
+  * HBASE
+  * Bigtable
+  * Hypertable
+
+## LSM树
+
+传统关系型数据库使用B+树作为存储结构，查找高效。但是逻辑上相近的数据物理上却可能相隔很远，导致大量的随机读写磁盘操作。
+
+随机读写比顺序读写慢很多。
+
+为了提升I/O性能，需要一种能将随机操作变为顺序操作的机制。
+
+LSM树能够实现顺序写磁盘，从而大幅提升写操作，作为代价的是牺牲了一些读性能。
+
+* 结构
+  * LSM树由两个或以上的存储结构组成
+  * 一个存储结构常驻内存中，称为C0 tree，具体可以是任何方便健值查找的数据结构，比如红黑树、map，甚至可以是跳表。
+  * 另外一个存储结构常驻在硬盘中，称为C1 tree，具体结构类似B树。C1所有节点都是100%满的，节点的大小为磁盘块大小。
+* Insert
+  * 插入一条新纪录时，首先在Log文件中插入操作日志（WAL） ，以便后面恢复使用。日志是以append形式插入，所以速度非常快
+  * 将新纪录的索引插入到C0中（在内存中完成，不涉及磁盘IO操作）
+  * 当C0大小达到某一阈值时或者每隔一段时间，将C0中记录滚动合并到磁盘C1中；
+  * 对于多个存储结构的情况，当C1越来越大就向C2合并，以此类推，一直合并到Ck
+    <img src="NoSQL.assets/image-20221109185735748.png" alt="image-20221109185735748" style="zoom:80%;" />
+* Merge
+  * 合并过程中会使用两个块：emptying block和filling block
+    * 1 从C1中读取未合并叶子节点，放置内存中的emptying block中。
+    * 2 从小到大查找C0中的节点，与emptying block进行合并排序，合并结果保存到filling block中，并将C0对应的节点删除。
+    * 3 不断执行第2步操作，合并排序结果不断填入filling block中，当其满了则将其**追加**到磁盘的新位置上。合并期间如果emptying block使用完了，再从C1中读取未合并的叶子节点。
+    * 4 C0和C1所有叶子节点都按以上合并完成后即完成一次合并
+  * <img src="NoSQL.assets/image-20221109193908380.png" alt="image-20221109193908380" style="zoom:80%;" />
+* 查找及删除
+  * 查找：先找内存的C0树，找不到则找磁盘的C1树，然后是C2树，以此类推
+  * 删除：为了快速执行，主要是通过标记来实现，在内存的C0树中将要删除的记录加delete marker。客户端检索时读不到实际的值；如果删除C0树不存在的记录，则在C0树中生成一个节点，加delete marker ，查找时可在内存中得知该记录已被删除，无需查找磁盘
+* 读写文件（以HBASE 为例）
+  * 更新文件时，数据先记录在日志WAL（Write-Ahead Log）中，然后写入内存中的memeStore中
+  * 当memStore中数据累计超过给定的阈值，系统将数据从内存刷写到磁盘中HFile文件
+  * 数据移出内存后，系统丢弃对应的提交日志，只保留未持久化到磁盘的提交日志
+  * 在将数据移出memStore到磁盘的过程中，系统不阻塞读写操作
+    * 用空的memStore获取更新的数据，将满的旧memStore中的数据转写到磁盘文件
+  * 删除操作时，加删除标记
+  * 读数据时，数据由两部分组成：memeStore中没写到磁盘的数据和磁盘上的存储的数据
+  * 随着memStore中的数据不断刷写到磁盘中，产生越来越多的HFile，HBase合并多个文件成一个较大的文件
+    * 将一个Region中多个HFile重写到一个新的HFile中
+
+## Document-oriented
+
+* 数据模型
+
+  * Key-Value的扩展形式，value表示为document，以标准半结构化格式，如XML、JSON或BSON（二进制JSON）
+  * Document：是document-oriented数据库的基本概念，是自包含的的数据单元，是一系列数据项的集合
+    * 每个数据项有名字与对应的值，值既可以是简单的数据类型，也可以是复杂的类型。
+    * 每个document有全局唯一的ID和版本号
+    * document是半结构化数据类型的数据
+    * document具有灵活的模式，可以在运行时添加或删除属性（属性具有名称和一个或多个值）
+  * 同一个document中数据的属性数量和类型可以不同。
+  * Document的格式已知，支持在key和value上建立索引和实现查询功能
+
+* 基本存储结构
+
+  * 适用于数据可以表达为document格式的应用，例如内容管理、博客等，数据包含各种属性，存在嵌套的情况
+  * Key-value pair形式
+    * 基本的key-value pair
+      <img src="NoSQL.assets/image-20221109195240387.png" alt="image-20221109195240387" style="zoom:80%;" />
+    * 带结构的Key-Value pair：Value有数组或嵌入的文档
+      <img src="NoSQL.assets/image-20221109195416884.png" alt="image-20221109195416884" style="zoom:80%;" />
+    * 多结构的Key-Value pair：Value的结构不同
+      <img src="NoSQL.assets/image-20221109195715104.png" alt="image-20221109195715104" style="zoom:80%;" />
+  * Document
+    * Key-value pair构成的有序集
+    * JSON、XML、BSON格式
+  * Collection
+    * 由若干个document构成的对象，通常这些document具有相关性
+  * Database
+    * 包含多个集合
+    * Database={collection}
+
+* 数据示例
+
+  * 在图像数据管理系统中，JSON格式的document 如下
+
+    ~~~json
+    {
+        route: /usr/images/img.png,
+        owner: {
+        	name: Xiaoming
+        	surname: Wang 
+    	},
+    	tags: ["sea","beach"]
+    } 
+    ~~~
+
+  * 随着系统需求变化，新的特征可以添加到系统中 ，如修改image owner 、图像的 checksum、用户的级别等，document 变为
+
+    ~~~json
+    { 
+        route: /usr/images/img.png, 
+        owner: { 
+           name: Xiaoming,
+           surname: Wang,
+           web: http://www.abcde.ecnu.edu.cn,
+        }, 
+        tags: ["sea","beach"], 
+        md5: 123456789abcdef123456789abcdef12, 
+        ratings: {
+           { 
+              user: John,
+              comment: "Verygood!",
+               stars: 4 
+           },
+           { 
+            user: Jane, 
+            comment: "BadIllumination", 
+            stars: 1 
+            } 
+        } 
+    } 
+    ~~~
+
+* 数据查询
+
+  * 允许查询document中的数据，而不必检索整个document
+  * CouchBase中的SQL-like 查询语言 (N1QL)
+    * 例如：查找*title=*“Vince Shields”的文档，返回属性 url 和categories的
+    * SELECT c.url, c.categories FROM Content_MetaData c WHERE title = 'Vince Shields'
+
+* 数据模型的代表
+
+  * MongoDB
+  * CouchBase
+  * ArangoDB
+
+## 图数据模型
+
+* 动机：语义Web、Web数据挖掘、知识图谱、生物系统中蛋白质的相互作用、社交网络应用等产生了大量面向图的数据，催生了图数据管理的需求。
+  * 有效地存储图数据，提供查询和分析图数据的操作
+  * 图论作为数据存储的理论基础：顶点表示实体、边表示实体间的关系
+* 用图结构存储数据，完成语义查询
+  * 由节点、节点间关系和属性表达和存储数据
+  * 节点存储数据
+  * 边存储节点之间的关系
+  * 属性表达数据的特征
+  * 用 Traversal 进行数据查询
+    <img src="NoSQL.assets/image-20221109201355873.png" alt="image-20221109201355873" style="zoom:80%;" />
+* 图模型种类
+  * 常用的图模型有3种，分别是属性图（Property Graph）、资源描述框架（RDF）三元组和超图（HyperGraph）
+* 数据模型示例
+  * 应用场景：社交网络、交通物流、推荐引擎、欺诈检测、知识图谱、生命科学和 IT/网络游戏开发等
+  * ![image-20221109201513031](NoSQL.assets/image-20221109201513031.png)
+* 图数据存储
+  * Nonnative
+    * 基于非图数据存储，如document-oriented存储或者关系数据库系统，通常需要索引技术提高图遍历的效率
+    * 例如，OrientDB、ArangoDB采用文档方式存储，Titan有两种存储选择： wide-column和 key-value).
+    * 分区策略基于底层的存储
+  * Native
+    * 存储基于图数据模型
+    * 例如Neo4j
+  * 三种著名的图优化存储技术
+    * Compressed Sparse Row (CSR)
+    * adjacency list
+    * edge list
+* 图数据访问
+  * Online graph navigations
+    * A basic path query 例如：查找John的社交网络中的朋友的名字（以及朋友的朋友……）
+    * A pattern matching query 例如：在John的社交网络中查找所有访问过埃菲尔铁塔的用户的名字。SPARQL, Neo4j Cypher和Gremlin是三个最著名的图查询语言，具有pattern matching 能力
+  * Offline analytical graph computations
+    * 需访问整个图的顶点和边的有效部分（例如，研究图的拓扑结构和寻找连通的组件），需要考虑高吞吐量的需求
+    * 研究热点
+* 图数据模型典型代表
+  * Neo4j
+  * Titan
+  * OrientDB
+  * GraphDB
+
