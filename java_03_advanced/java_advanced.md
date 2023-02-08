@@ -4896,3 +4896,198 @@ public class Test {
   * 字节码的最后一部分，该项存放了在该文件中类或接口所定义属性的基本信息
   * 属性信息相对灵活，编译器可自由写入属性信息，JVM会忽略不认识的属性信息
   * 如：SourceFile: "HelloWorld.java"
+
+## Java字节码指令分类
+
+* Java字节码
+  * class文件被JVM加载后，就执行其代码
+  * 每一个Java字节码指令，是一个byte数字，也有一个对应的助记符(opcode)
+  * 目前总共有200多个字节码指令
+
+* JVM基础（Heap、Stack、Frame）
+  * <img src="java_advanced.assets/image-20221112003143756.png" alt="image-20221112003143756" style="zoom:80%;" />
+  * 包括main线程在内，每个线程有个线程栈来存放数据和操作指令，每个线程栈中存放多个栈帧，存放着线程中被调用的方法的局部变量、执行的命令，操作帧里有本地变量表，工作时用到的数据放到操作栈上进行加工
+
+* 字节码分类
+
+  * 加载和存储指令
+    * 用于将数据在栈帧中的局部变量表和操作数栈之间来回传输
+    * 将一个局部变量加载到操作栈：iload、lload、fload、dload、aload等
+    * 将一个数值从操作数栈存储到局部变量表：istore、Istore、fstore、dstore、astore 等
+    * 将一个常量加载到操作数栈：bipush、sipush、ldc、ldc_w、ldc2_w、aconst_null、 iconst_m1等
+  * 运算指令
+    * iadd、isub、imul、idiv等
+  * 类型转换指令
+    * i2b、i2l、i2s等
+  * 对象/数组创建与访问指令
+    * new、newarray、getfield 等
+  * 操作数栈管理指令
+    * pop、dup等
+  * 控制转移指令
+    * lfeq、goto等
+  * 方法调用和返回指令
+    * invokevirtual、ireturn等
+  * 异常处理指令
+    * athrow
+  * 同步控制指令
+    * monitorenter、monitorexit
+
+* 字节码指令简介
+
+  * JVM指令由操作码和零至多个操作数组成
+    * 操作码（OpCode，代表着某种特定操作含义的数字）
+    * 操作数（Operand，操作所需参数）
+  * JVM的指令集是基于栈而不是寄存器
+    * 字节码指令控制的是JVM操作数栈
+
+* 字节码指令示例
+
+  * ~~~java
+    public class Sum {
+    	private int base = 10;
+    	
+    	public long add(int toAdd) {
+    		this.base += toAdd; 
+    		return this.base;
+    	}
+    }
+    ~~~
+
+  * ~~~
+    public long add(int);
+        descriptor: (I)J
+        flags: ACC_PUBLIC
+        Code:
+          stack=3, locals=2, args_size=2
+             0: aload_0
+             1: dup
+             2: getfield      #12                 // Field base:I
+             5: iload_1
+             6: iadd
+             7: putfield      #12                 // Field base:I
+            10: aload_0
+            11: getfield      #12                 // Field base:I
+            14: i2l
+            15: lreturn
+          LineNumberTable:
+            line 6: 0
+            line 7: 10
+          LocalVariableTable:
+            Start  Length  Slot  Name   Signature
+                0      16     0  this   LSum;
+                0      16     1 toAdd   I
+    ~~~
+
+    * aload_0将索引为0的局部变量压栈，在LocalVariableTable即this
+    * dup复制栈顶值并压栈
+    * getfield取出栈顶对象引用（消费掉），获取其成员变量并压栈
+    * iload_1将索引为1 int型局部变量压栈，即toAdd变量
+    * iadd取出栈顶两个int型值相加，结果压栈
+    * putfield将栈顶两个元素取出（值和对象引用），将值赋给该对象字段
+    * i2l将栈顶int型值取出转为long型压栈
+    * lreturn将栈顶long型元素取出返回
+
+  * 以add(5)为例展示栈的变化（->表示空）
+
+    <img src="java_advanced.assets/image-20230207214949442.png" alt="image-20230207214949442" style="zoom:80%;" />
+
+
+
+## Java字节码操作-ASM
+
+字节码操作:指令层次较为复杂，ASM是生成、转换、分析class文件的工具，被Groovy/Kotlin Compiler、Gradle、Jacoco、Mockito采用
+
+* ASM API
+  * **Core API**
+    * 类比解析XML文件中的SAX方式（流模型）
+    * 不需要读取类的整个结构，使用流式的方法来处理字节码文件
+    * 非常节约内存，但是编程难度较大
+    * 出于性能考虑，一般情况下编程都使用Core API
+  * Tree API
+    * 类比解析XML文件中的DOM方式，把整个类的结构读取到内存中
+    * 消耗内存多，但是编程比较简单
+    * 通过各种Node类来映射字节码的各个区域
+
+* ASM API 核心类
+  * ClassReader用于读取已经编译好的.class文件
+  * ClassWriter用于重新构建编译后的类（生成一个新的class文件）
+    * 如修改类名、属性以及方法，也可以生成新的类的字节码文件
+  * Visitor类
+    * Core API根据字节码从上到下依次处理
+    * 对于字节码文件中不同的区域有不同的Visitor， 举例如下
+      * MethodVisitor 用于访问类方法
+      * FieldVisitor访问类变量
+      * AnnotationVisitor 用于访问注解
+
+更多详情暂未了解
+
+
+
+## 字节码增强
+
+字节码操作：通常在字节码使用之前完成。（源码、编译、(字节码操作)、运行）
+
+字节码增强：运行时对字节码进行修改/调换。支持两种方式：Java Classloader类加载器；Java Instrument
+
+* Java Instrument
+  * JDK 5引入，java.lang.instrument包
+  * 对程序的替换，都是通过代理程序（javaagent）进行，有以下两种
+  * premain：支持在main函数运行之前，对类的字节码进行修改/替换
+  * agentmain：支持在程序运行过程中，对字节码进行替换
+* Java运行前代理
+  * 在main函数运行之前，修改/替换某类的字节码
+  * 准备启动Java程序时，给java.exe增加一个参数javaagent:someone.jar（这个jar包是自己写的）
+  * 在someone.jar的清单文件(manifest)指定了Premain-Class:SomeAgent，Premain-Class这个类会告诉JVM在main函数运行之前自己定义的SomeAgent类
+  * SomeAgent类中，有一个premain方法，此方法先于main运行
+  * premain方法有一个Instrumentation的形参，可以调用addTransformer方法，此方法里面可以增加一个ClassTransformer转换类
+  * 自定义一个ClassTransformer类，重写tranform方法，修改/替换字节码
+
+更多详情暂未了解
+
+
+
+## 字节码混淆
+
+* java字节码弱点
+  * Java字节码文件机制
+    * .java文件是程序源码，是程序员智慧劳动的结晶，需要保护
+    * 字节码文件是程序运行的主体，遵守JVM的规范，且被分发使用
+    * 为了各种需要，产生出很多反编译工具，从字节码恢复源码
+
+* java字节码保护
+  * 字节码加密
+    * 对字节码进行加密，不再遵循JVM制定的规范
+    * JVM加载之前，对字节码解密后，再加载
+  * 字节码**混淆**
+    * 被混淆的代码依然遵循JVM制定的规范
+    * 变量命名和程序流程上进行等效替换，使得程序的可读性变差
+    * 代码难以被理解和重用，达到保护代码的效果
+* ProGuard
+  * 最著名的Java字节码混淆器https://www.guardsquare.com/en/products/proguard
+  * 除了混淆Obfuscation，也具有代码压缩shrinking、优化optimization、预检preverification等功能
+  * 可以命令行运行，也可以集成到Eclipse等IDE中使用
+  * 不仅可以处理Java代码，也可以处理Android的代码
+  * 注意事项
+    * 反射调用类或者方法，可能失败
+    * 对外接口的类和方法，不要混淆，否则调用失败
+    * 嵌套类混淆，导致调用失败
+    * native的方法不要混淆，JNI，调用C函数
+    * 枚举类不要混淆
+    * ……
+
+
+
+## 总结
+
+* Java字节码操作
+  * 字节码生成(编译优化，动态编译)
+  * 字节码操作(字节码工具)
+  * 字节码运行时修改(Java Instrument，Class Loader)
+  * 字节码混淆和加密(ProGuard混淆)
+  * 字节码运行时效率增强(JIT即时编译，常规情况下JVM解释运行字节码，调用频繁的字节码做即时编译)
+* Java字节码操作是框架软件实现的重要手段
+  * Hibernate使用Byte-buddy和Javassist
+  * MyBatis使用Javassist和Cglib
+  * Tomcat使用Cglib
+  * AspectJ、Findbugs使用BCEL
+  * OpenJDK、Cglib、Gradle使用ASM
