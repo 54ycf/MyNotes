@@ -5091,3 +5091,120 @@ public class Test {
   * Tomcat使用Cglib
   * AspectJ、Findbugs使用BCEL
   * OpenJDK、Cglib、Gradle使用ASM
+
+
+
+# (11)Java类加载器
+
+## Java类加载机制
+
+* 类加载过程
+  * 程序是依靠多个Java类共同协作完成的
+  * JVM依据classpath执行的类库的顺序来查找类，根据具体配置加载程序所需要的类，classpath找不到所需类则报ClassNotFoundException错误
+  * 潜在的问题，故需要给类的加载定义一套规范
+    * 如何找到正确的类，如classpath路径的前后优先级
+    * 如何避免恶意的类，如一个假的String类
+    * 加载的顺序，如先加载父类，还是子类
+* 类加载器ClassI oader
+  * 负责查找、加载、校验字节码的应用程序
+  * java.lang.ClassLoader
+    * load(String className)根据名字加载一个类，返回类的实例
+    * defineClass(String name, byte[] b, int off, int len)将一个字节流b定义一个类
+    * findClass(String name)查找一个类
+    * findLoadedClass(String name)在已加载的类中，查找一个类
+    * 成员变量ClassLoader parent
+* JVM四级类加载器（优点：层次分明，逐级加载，确保核心类可信，兼顾静态和动态）
+  * 启动类加载器(Bootstrap)，系统类rt.jar
+  * 扩展类加载器(Extension)，jre/lib/ext中的jar。JDK9以及之后叫做Platform加载器
+  * 应用类加载器(App)，给应用程序配置的classpath上的jar
+  * 用户自定义加载器(Plugin)， 程序自定义
+* 类加载器双亲委托 Parent Delegation Model
+  * 首先判断是否已经加载
+  * 若无，找父加载器加载
+  * 若再无，由当前加载器加载
+
+
+
+## Java类双亲委托加载扩展
+
+* Java严格执行双亲委托机制
+
+  * 类会由最顶层的加载器来加载，如没有，才由下级加载器加载
+  * 委托是单向的，确保上层核心的类的正确性，下层可以用上层加载的类
+  * 但是上级类加载器所加载的类，无法访问下级类加载器所加载的类
+    * 例如，java.lang.String 无法访问自定义的一个Test类
+    * Java是一个遵循契约设计的程序语言，核心类库提供接口，应用层提供实现
+    * 核心类库是BootstrapClassLoader加载
+    * 应用层是AppClassLoader加载
+    * 典型例子是JDBC和XML Parser等
+
+* 双亲委托的补充
+
+  * 执行Java时，添加虚拟机参数-Xbootclasspath/a:path，将类路径配置为Bootstrap等级，使用java -X查看具体的帮助
+
+  * 使用ServiceLoader.load方法，来加载（底层加载器所加载的类），以JDBC加载为例
+
+    ~~~java
+    Class.forName("com.mysql.jdbc.Driver") ;
+    String url = "jdbc:mysql://localhost:3306/test";
+    //构建Java和数据库之间的桥梁: URL，用户名，密码
+    Connection conn = DriverManager.getConnection(url,"root", "123456");
+    
+    //java.sql.DriverManager是Bootstrap加载器加载的，需要访问到com.mysql.jdbc.Driver类
+    ~~~
+
+    * 每个JDBC驱动都封装在jar包中，每个jar包里都有META-INF目录，META-INF目录下有services目录，此目录下有java.sql.Driver文件，名字和类名一样，文件名是要发布的接口的名字，文件中有具体实现类的名字
+    * ServiceLoader是JDK6引入的一种新特性，用于加载服务的一种工具，服务有接口定义和具体的实现类（服务提供者）。SPI机制，Service Provider Interface。
+    * 调用方通过ServiceLoader.load方法加载一个接口所有的实现类，接口根据本地服务发现和服务加载就可以探知所有服务提供方发布的具体的服务实现类
+      <img src="java_advanced.assets/image-20230208190659700.png" alt="image-20230208190659700" style="zoom:80%;" />
+    * 一个服务提供者会在jar包中有META-INF/services目录，里面放一个文件，名字同接口名字。内容的每一行都是接口的一个实现类
+    * load方法，可以用**当前线程的类加载器**来获取某接口的所有实现，所有的实现也都是转为接口类来使用。例如加载了文件中的某一行com.mysql.jdbc.Driver类，把实现类转换为文件名的java.sql.Driver接口来使用
+    * 注意：此服务和Java9模块系统的服务略有差别，但是都能通过
+      ServiceLoader进行加载。本质上是接口和接口实现类，发布接口，吟唱实现类
+
+
+
+## 自定义加载路径
+
+* 弥补类搜索路径静态的不足，Bootstrap、Extension和App类加载器都是运行前确定的
+* URLClassLoader
+  * 继承自ClassLoader
+  * 程序运行时新增类的加载路径
+  * 可从多个来源中加载类：目录、jar包、网络
+  * addURL添加路径
+  * close方法关闭
+  * 可以使用Java NIO的WatchService来监控文件是否修改，重新加载文件实现热部署
+
+## 自定义类加载器
+
+* 比自定义加载路径的动态性和自由度更大
+* 继承ClassLoader类
+* 重写findClass(String className)方法
+* 可以在加载过程中对字节码进行修改，包括加密解密校验等操作
+* 使用时，默认先调用loadClass(className)来查看是否已经加载过，然后委托双亲加载，如果都没有，再通过findClass加载返回
+  * 在findClass中，首先读取字节码文件
+  * 然后，调用defineClass(className, bytes, off, len) 将类 注册到虚拟机中
+  * 可以重写loadClass方法来突破双亲加载
+  * 同一个类被多个不同层级的类加载器加载，在虚拟机中也会被当作不同的类，不能强转，编译通过但运行时会报类型转换异常
+
+
+
+## 总结
+
+* JVM四级类加载器的动态性
+  * 使用虚拟机参数-Xbootclasspath，将jar或 目录提高到Bootstrap等级
+  * 使用ServiceLoader和SPI机制，实现上层加载器的类，访问下层加载器的类
+  * 使用URLClassLoader，可以在运行时增加新的classpath路径
+  * 使用自定义的ClassLoader，可以通过重写loadClass和findClass方法动态加载字节码，还可以在加载字节码过程中进行修改/校验等操作
+* JVM类装载过程
+  * **加载**(loading)
+  * 链接(linking)
+    * 验证(Verification)，字节码是否满足规范要求
+    * 准备(Preparation)，分配内存，常量池初始化
+    * 解析(Resolution)，解析类/接口/字段/方法的符号引用
+  * 初始化(Initializing)，执行类的初始化方法<clinit\>
+* Java类加载器：类的加载和隔离
+* 基于类加载器，诞生OSGi
+  * OSGi，Open Service Gateway Initiative, https://www.osgi.org/
+  * 在OSGi容器里面运行bundle，通过类加载器来控制类的可见性
+* 类加载器和模块(module)之间的关系
