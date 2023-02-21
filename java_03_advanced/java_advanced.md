@@ -5208,3 +5208,266 @@ public class Test {
   * OSGi，Open Service Gateway Initiative, https://www.osgi.org/
   * 在OSGi容器里面运行bundle，通过类加载器来控制类的可见性
 * 类加载器和模块(module)之间的关系
+
+
+
+ # (12)JVM内存管理
+
+## JVM概述
+
+* 虚拟机：VM，Virtual Machine
+  * 逻辑上，一台虚拟的计算机
+  * 实际上，一个软件，能够执行一系列虚拟的计算指令
+  * 系统虚拟机
+    * 对物理计算机的仿真
+    * 如VMWare，Oracle VirtualBox等
+  * 软件虚拟机.
+    * 专门为单个计算程序而设计，如JVM等
+
+* Hotspot虚拟机构成
+  * <img src="java_advanced.assets/image-20230209161056887.png" alt="image-20230209161056887" style="zoom:80%;" />
+
+
+
+## JVM内存分类
+
+* Java自动内存管理
+  * 传统程序语言：由程序员手动内存管理
+    * C/C++，malloc申请内存和free释放内存
+    * 由于程序员疏忽或程序异常，导致内存泄露
+  * 现代程序语言：自动内存管理
+    * Java/C#，采用内存自动管理
+    * 程序员只需要申请使用，系统会检查无用的对象并回收内存
+    * 系统统一管理内存，内存使用相对高效，但也会出现异常
+
+JVM内存
+
+* 线程私有内存
+  * 程序计数器(Program Counter Register)
+    * Program Counter Register，一块小内存，**每个线程都有**
+    * PC存储当前正在执行的方法（线程正在执行的方法称为该线程的当前方法）
+    * 当前方法为本地(native)方法时（如C语言写的方法），pc值未定义(undefined)
+    * 当前方法为非本地方法时，pc包含了当前正在执行指令的地址
+    * 当前唯一块不会引发OutOfMemoryError异常
+  * Java虚拟机栈(JVM Stack、Java栈)
+    * 每个线程有自己独立的Java虚拟机栈，**线程私有**
+    * -Xss设置每个线程堆栈大小
+    * Java方法的执行基于栈
+      * 每个方法从调用到完成对应一个栈帧在栈中入栈、出栈的过程
+      * 栈帧存储局部变量表、操作数栈等
+      * 局部变量表存放方法中存放在“栈”里面的东西
+    * 引发的异常
+      * 栈的深度超过虚拟机规定深度，StackOverflowError异常
+      * 使用过多变量的话，无法扩展内存，OutOfMemoryError异常
+  * 本地方法栈(Native Method Stack)
+    * 存储native方法的执行信息，**线程私有**
+    * VM规范没有对本地方法栈做明显规定
+    * 引发的异常
+      * 栈的深度超过虚拟机规定深度，StackOverflowError异常
+      * 无法扩展内存，OutOfMemoryError异常
+* 多线程共享内存
+  * 堆(Heap)
+    * 虚拟机启动时创建，所有线程共享，占地最大
+    * 对象实例和数组都是在堆上分配内存
+    * 垃圾回收的主要区域
+    * 设置大小
+      * -Xms初始堆值，-Xmx最大堆值
+    * 引发的异常
+      * 无法满足内存分配要求，OutOfMemoryError异常
+  * 方法区(Method Area)
+    * 存储JVM已经加载类的结构，所有线程共享（JVM加载的类的数量有限）
+      * 运行时常量池、类信息、常量、静态变量等
+    * JVM启动时创建，逻辑上属于堆(Heap)的一部分
+    * 很少做垃圾回收（加载的静态的类的信息）
+    * 设置大小
+      * 1.7及以前：永久区(Perm)， -XX:PermSize，-XX:MaxPermSize
+      * 1.8及以后：元数据区，-XX:MetaspaceSize，XX:MaxMetaspaceSize
+    * 引发的异常
+      * 无法满足内存分配要求， OutOfMemoryError异常
+      * 谨慎使用import *，加载类越多系统压力越大
+  * 运行时常量池(Run-Time Constant Pool)
+    * Class文件中常量池的运行时表示
+    * 属于**方法区**的一部分
+    * 动态性
+      * Java语言并不要求常量一定只有在编译期产生，比如String.intern方法
+    * 引发的异常
+      * 无法满足内存分配要求，OutOfMemoryError异常。只能调整方法区的大小，无法直接调节常量池大小
+* <img src="java_advanced.assets/image-20230209170337606.png" alt="image-20230209170337606" style="zoom:80%;" />
+
+
+
+## JVM内存参数
+
+* JVM默认运行参数
+  * 支持JVM运行的重要配置，根据操作系统/物理硬件不同而不同
+  * 使用`-XX:+PrintFlagsFinal`显示VM的参数，如`java -XX:+PrintFlagsFinal | findstr HeapSize`
+* 程序启动的两类参数
+  * 程序参数：程序可以读到，存储在main函数的形参数组中
+  * 虚拟机参数：更改默认配置，用以指导进程运行
+    * -X参数，不标准，不在所有VM通用；-XX参数，不稳定，容易变更
+
+
+
+## Java对象引用
+
+* JVM内置有垃圾收集器.
+
+  - GC，Gatbage Collector
+  - 自动清除无用的对象，回收内存
+
+* 垃圾收集器的工作职责（John McCarthy）
+
+  * 什么内存需要收集（判定无用的对象）
+  * 什么时候回收（何时启动，不影响程序正常运行）
+  * 如何回收（回收过程，要求速度快/时间短/影响小）
+
+* Java对象的生命周期
+
+  * 对象通过**构造函数**创建，但是没有**析构函数**回收内存
+  * 对象存活在离它最近的一对大括号中
+
+* Java程序语言关于内存回收的API
+
+  - Object的finalize方法，垃圾收集器在回收对象时调用，有且仅被调用一次（无法预测方法什么时候被调用）
+  - System的gc方法，运行垃圾收集器（也不靠谱，就算调用了虚拟机也不一定会立刻运行gc）
+
+* 基于对象引用判定无用对象
+
+  * 零引用，互引用
+
+* 对象引用链
+
+  * 通过一系列的称为"GCRoots"的对象作为起始点，从这些节点开始向下搜索，搜索所走过的路径称为引用链(Reference Chain)，当一个对象到GC Roots没有任何引用链相连（用图论的话来说，就是从GC Roots到这个对象不可达）时，则证明此对象是不可用的
+  * 对象可达性分析
+    <img src="java_advanced.assets/image-20230209215442276.png" alt="image-20230209215442276" style="zoom:80%;" />
+  * GC Roots对象包括（当前活着的对象）
+    * 虚拟机栈中引用的对象
+    * 方法区中类静态属性引用的对象
+    * 方法区中常量引用的对象
+    * 本地方法栈中引用的对象
+
+* 为加快GC判定无用对象的速度，Java提供了几种不同的引用方法，是的GC能够快速定位一些没有用的对象引用
+
+  * 强引用。以前学过的对象赋值
+
+    * 例如Object obj = new Object0; Object obj2 = obj;
+
+    * 只耍强引用还存在，对象就不会被回收，哪怕发生OOM异常
+
+    * ~~~java
+      /*以下程序启动参数-Xmx5M 堆内存5M*/
+      StringBuilder s1 = new StringBuilder("大字符");
+      StringBuilder s2 = s1; //普通赋值是强引用类型
+      s1 = null; //s1 为null, 但是s2依旧占据内存
+      System.gc(); //垃圾回收, 无法对强类型引用回收, 内存被占用, 引发异常
+      
+      byte[] b = new byte[1024*1024*3]; //申请3M空间
+      /*会有OOM异常，gc无法回收掉大字符*/
+      ~~~
+
+  * 软引用
+
+    * 描述有用但并非必需的对象
+
+    * 在系统将要发生内存溢出异常之前，会把这些对象列为可回收
+
+    * JDK提供了SoftReference类来实现软引用
+
+    * ~~~java
+      StringBuilder s1 = new StringBuilder("大字符");
+      SoftReference<StringBuilder> s2 = new SoftReference<StringBuilder>(s1); //软引用
+      s1 = null;
+      
+      System.out.println(s2.get().length()); //not null
+      System.gc();//软引用, 内存不紧张, 没有回收
+      System.out.println(s2.get().length()); //not null
+      
+      byte[] b = new byte[(int)(1024*1024*3.5)];
+      
+      System.gc();//内存紧张, 软引用被回收
+      System.out.println(s2.get()); //null
+      ~~~
+
+  * 弱引用
+
+    * 描述非必需对象，比软引用强度更弱些
+
+    * 被弱引用关联的对象只能生存到下一次垃圾收集发生之前
+
+    * JDK提供了WeakReference类来实现弱引用
+
+    * ~~~java
+      StringBuilder s1 = new StringBuilder("大字符");
+      WeakReference<StringBuilder> s2 = new WeakReference<StringBuilder>(s1);
+      s1 = null;
+      
+      System.out.println(s2.get().length());//有值
+      System.gc();//弱引用，只要gc，就会回收
+      System.out.println(s2.get()); //null
+      ~~~
+
+  * 虚引用
+
+    * 最弱的引用关系，JDK提供PhantomReference实现虚引用
+
+    * 为一个对象设置虚引用关联的唯一目的就是能在这个对象被收集器回收时收到一个系统通知，用于对象回收跟踪
+
+    * ~~~java
+      ReferenceQueue<StringBuilder> queue = new ReferenceQueue<StringBuilder>();
+      Thread t = new CheckReferenceQueue(queue);
+      t.setDaemon(true);
+      t.start();
+      
+      StringBuilder s1 = new StringBuilder("大字符");
+      PhantomReference<StringBuilder> s2 = new PhantomReference<StringBuilder>(s1,queue); //虚引用
+      s1 = null;
+      //虚引用随时可能被回收,甚至没有被GC
+      System.out.println(s2.get()); 
+      
+      System.gc();
+      
+      System.out.println(s2.get()); //null
+      
+      /*
+      null
+      null
+      obj is deleted
+      */
+      
+      /*********************************/
+      
+      class CheckReferenceQueue extends Thread
+      {
+      	ReferenceQueue<StringBuilder> queue = null;
+      	
+      	public CheckReferenceQueue(ReferenceQueue<StringBuilder> queue){
+      		this.queue = queue;
+      	}
+      	
+      	public void run(){
+      		while(true){
+      			if(queue != null){
+      				PhantomReference<StringBuilder> obj = null;
+      				try{
+      					obj = (PhantomReference<StringBuilder>) queue.remove();
+      				}catch(Exception e){
+      					e.printStackTrace();
+      				}
+      				if(obj != null){
+      					System.out.println("obj is deleted");
+      				}
+      			}
+      		}
+      	}
+      }
+      ~~~
+
+    * 虚对象本质不是为程序员服务的，需对象随时会变成null，不可用
+
+  * <img src="java_advanced.assets/image-20230210000904865.png" alt="image-20230210000904865" style="zoom:80%;" />
+    软引用和弱引用，适合用来保存可有可无的缓存数据
+
+
+
+## 垃圾收集算法
+

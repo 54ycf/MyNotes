@@ -180,7 +180,7 @@
     * **映射表：**用一个映射表记录虚拟节点和真实节点的对应关系。通过将虚拟节点从加载较多的节点移动到加载较少的节点来处理倾斜。可以解决数据倾斜和执行倾斜
   * 使用范围分区向量跨虚拟节点划分记录
     * 也可以用Hash分区
-* 一致性HASH（考）
+* **一致性HASH**（考！）
   * 为了解决分布式Cache问题：哈希映射到N个Cache，如果某个Cache m坏了或者需要增添Cache如何解决。
   * 环形hash空间：设共有$2^{32}$个bucket空间，首尾相接形成环形空间，按顺时针方向编址。通过hash函数计算将数据对象映射到环形hash空间
   * 使用相同的hash函数将节点（cache/server）映射到环形hash空间（通常使用节点的IP地址）
@@ -534,3 +534,562 @@ LSM树能够实现顺序写磁盘，从而大幅提升写操作，作为代价�
   * OrientDB
   * GraphDB
 
+
+
+# BigTable
+
+* 出现的背景：Google众多的产品面临数据管理的挑战，如Google Web Index、Google Analytics、Personalized Search、Google Earth
+* 动机：
+  * 需要存储的数据种类繁多、类型多样。如URL、图片、文字、视频、html文件、用户设置数据等
+  * 需要处理海量的服务请求
+  * 商用数据库无法满足Google的需求，底层系统技术的掌控便于系统维护和升级
+* 目标（这俩不考）
+  * 广泛的适用性：满足Google的系列产品的需求
+  * 很强的可扩展性：横向扩展和纵向扩展
+  * 高可用性：确保系统24×7可用
+  * 简单：底层系统简单减少出错概率，为上层应用开发提供便利
+
+## 数据模型
+
+* 分布式多维映射表结构
+* 表中数据通过**行关键字**（Row key）、**列关键字**（Column key）以及**时间戳**进行索引，所有数据以字符串形式存储，由用户解析数据结构。
+* 存储逻辑表示为(row:string, column:string, item:int64) -> string
+* 例：网页[www.cnn.com](http://www.cnn.com/)的数据片段
+  * 行名称是倒排的*URL*
+    * 便于同一地址域的网页被存储在表中连续的位置
+    * 便于数据压缩，大幅提高压缩率
+  * *contents*列族包含了网页内容
+  * *anchor*列族包含了任何引用这个页面的*anchor*文本
+    * *CNN*的主页被*Sports Illustrated*和*MY-look*主页同时引用，因此，行包含了名称为”anchor:cnnsi.com”和”anchor:my.look.ca”的列
+  * 每个*anchor*单元格都只一个版本，*contents*列有三个版本，分别对应于时间戳*t3,t5*和*t6*
+    <img src="NoSQL.assets/image-20230215223227930.png" alt="image-20230215223227930" style="zoom:80%;" />
+* Rows
+  * BigTable的row key是任意的字符串，大小不超过64KB
+  * 对于每行数据的读写操作都是原子的（atomic），不管这个行中所包含的列族数量是多少
+  * BigTable中的数据按照row key的字典顺序排序
+  * 单个大规模的大表不利于数据的处理与分析，BigTable将一个表划分成多个**子表**（Tablet），是负载均衡和数据分发的基本单位
+* Column Families
+  * BigTable将column key组织成列族（column family），是基本的访问控制单元，每个列族的数据属于同一个类型，同列族数据**压缩**存储
+  * 在把数据存放到这个column family的某个column key下之前，必须首先创建这个column family，创建后，可以使用column key 
+    * 表当中所包含的column family的数量尽可能少（至多几百个列族），在操作过程当中， column family很少发生变化；一个表可以包含无限数量的列。
+    * column key命名语法：family:qualifier。例: *anchor:cnnsi.com*
+    * 访问控制以及磁盘、内存审计在column family级别完成
+* timestamps
+  * 在BigTable中，每个单元都包含相同数据的多个版本，这些版本采用时间戳进行索引
+  * 时间戳是64位整数，代表真实时间，以微秒来计算。客户应用也可以直接分配时间戳
+  * 需要避免冲突的应用必须生成唯一的时间戳
+  * 一个单元的不同版本根据时间戳**降序**顺序存储，最新的版本可以被最先读取
+  * 为了减轻版本数据的管理负担， BigTable支持用户设定保存单元中数据的最近n个版本，或者只保存足够新版本（比如只保存最近7天内的数据版本）
+
+## 体系结构
+
+<img src="NoSQL.assets/image-20230215225327669.png" alt="image-20230215225327669" style="zoom:80%;" />
+
+* **BigTable基于Google的的三个云计算组件**（考！）
+  * GFS: Google File System
+    * 基于廉价的商用计算机的大型分布式文件系统
+  * Chubby
+    * 基于松耦合分布式系统的锁服务
+    * 存储元数据的存储系统
+    * 名字服务
+  * WorkQueue
+    * 分布式任务调度器，用于处理分布式系统队列分组与调度
+    * 未公开
+
+## Chubby
+
+* 分布式锁服务**Chubby**
+  * 提供存储服务并为其他基础设施（GFS和Bigtable）提供协调服务
+    * GFS使用Chubby选取master服务器，Bigtable使用chubby指定master服务器并发现、控制相关的子表服务器。
+  * 提供粗粒度的分布式锁
+    * Advisory lock，不是Mandatory lock
+    * 锁持有时间可以长达几天
+  * 提供一个文件系统，为小文件提供可靠存储，补充GFS提供的服务
+  * 做Google内部的名字服务
+  * 核心服务：提供分布式共识解决方案
+    * 其他服务从这一服务衍生
+  * 通常一个数据中心运行一个chubby cell（服务实例）
+* Chubby的一些**设计考虑**：Google没有直接实现包含Paxos算法的函数库来保持数据一致性，而是设计实现了锁服务Chubby
+  * 单独的锁服务可以保证原有系统架构不发生改变
+  * 避免应大量系统组件之间的事件通信导致的系统性能下降
+    * 系统中很多事件的发生需要告知其它用户和服务器，使用基于文件系统的锁服务可以将变动写入文件，从而需要了解变动的用户和服务器直接访问文件，
+  * 相比一致性算法，基于锁的开发接口容易被开发者接受
+  * 单独的锁服务使用一台服务器可以保证高可用性
+    * 实现chubby服务采用多台服务器实现高可用性，而外部用户则需一台服务器保证高可用性
+  * Chubby**采用建议性锁而不是强制性锁**
+    * 当用户访问拥有锁的文件时，强制性锁阻止访问，而建议性锁不会阻止。
+* Chubby**体系结构**
+  * 两个部分：client和server，通过RPC通信
+    * 客户端每个客户有一个Chubby library，客户端应用调用这个库中的函数
+    * 服务端称作Chubby cell，通常由5个副本组成，其中一个副本被指定为主副本(master)，并且一段时间只有一个master。这段时间成为master lease
+  * 每个副本维护一个小型数据库，管理Chubby命名空间中的实体，即目录和锁
+  * 数据库的一致性使用底层的共识协议（Paxos算法）实现
+    * 基于操作日志
+    * 支持创建快照snapshots（在给定时间点上完整的系统状态）
+  * <img src="NoSQL.assets/image-20230215231012218.png" alt="image-20230215231012218" style="zoom:80%;" />
+* Chubby**文件**
+  * Chubby提供基于文件系统的抽象，每一个数据对象是一个文件，文件组织成层次的命名空间，采用 目录结构
+    * 所有操作在文件的基础上完成
+  * Chubby的名字空间结构类似于文件系统，这样就使得可以为应用提供特定的API，也可以使用他文件系统的接口，例如GFS
+  * 文件系统与Unix文件系统类似
+    * 文件名形式：/ls/chubby_cell/directory_name/…/file_name
+      * ls指锁服务lock service，指明是chubby系统的一部分
+      * Chubby_cell是chubby系统的一个特定实例的名字
+  * 名字空间由文件和目录组成，统称为node。每个node在一个Chubby cell单元中只有一个名称与之关联
+  * 实现时，文件系统由多个节点组成，分为永久型和临时型，每个节点是一个文件或目录，包含元数据
+    * 三个访问控制列表(ACLs)：用于控制读、写操作及修改节点的访问控制列表(ACL)
+  * 每个节点的元数据还包含4个严格递增的64位数字，通过它们客户端可以很方便的检测出变化
+    * 实例号
+    * 内容生成号
+    * 锁生成号
+    * ACL生成号
+* Chubby**访问接口**
+  <img src="NoSQL.assets/image-20230215231422127.png" alt="image-20230215231422127" style="zoom:80%;" />
+* **一致性**
+  * Chubby cell有5个副本，通过选举产生主服务器（主副本），存在一致性问题
+    * 采用Paxos算法
+  * 客户端所有读写操作由主服务器负责完成，写操作面临数据一致性问题
+    * 采用Paxos算法
+
+## Master Server
+
+* BigTable的基本架构—**Master Server**
+  * Master Server的作用
+    * 新Tablet分配
+    * Tablet Server状态监控
+    * Tablet Server之间的负载均衡
+  * Master Server启动
+    1. 从Chubby中获取一个独占锁，确保同一时间只有一个Master Server
+    2. 扫描服务器目录，发现目前活跃的Tablet Server
+    3. 与所有活跃Tablet Server建立联系并了解Tablet的分配情况
+    4. 扫描METADATA表，发现未分配的Tablet并将其分配到合适的Tablet Server 。如果METADATA表未分配，则首先将Root Tablet加入未分配的Tablet中（Root Tablet保存其他Metadata Tablet的信息）
+
+## Tablet Server
+
+* BigTable的基本架构—**Tablet Server**
+  * Bigtable中数据以Tablet的形式保存在Tablet Server上，客户只和Tablet Server通信。
+  * SSTable（Sorted String Table）
+    * SSTable是Google为Bigtable设计的内部数据存储格式，所有SSTable文件存储在GFS上（自己实现文件管理）
+    * 一个SSTable提供一个持久化的、排序的、不可变的、从key到value的映射，其中，key和value都是任意的字节字符串
+    * 用户通过key查询相应的值。
+  * SSTable中的数据被分成64KB大小的块，索引保存块的位置信息（OS通常4KB）
+    <img src="NoSQL.assets/image-20230216000541795.png" alt="image-20230216000541795" style="zoom:80%;" />
+  * Tablet的组成
+    * 概念上， Tablet是表中一系列行的集合。
+    * 每个Tablet由多个SSTable和日志文件构成，不同Tablet的SSTable可以共享。
+    * 日志是一种共享文件，每Tablet Server仅保存一个日志文件，日志内容按key值排序
+    * <img src="NoSQL.assets/image-20230216000617574.png" alt="image-20230216000617574" style="zoom:80%;" />
+  * Tablet Location：类似B+树的三层架构
+    * 第一层是一个存储在Chubby中的文件，包含root tablet的位置信息。root tablet包含了所有tablet的位置信息，存储在METADATA表中。
+    * 每个METADATA表都包含一个user tablet集合的位置信息。
+    * root tablet是METADATA表中第一个Tablet，任何情况下不会被拆分，保证了tablet的位置层次不会超过三层。
+    * METADATA表将每个子表的位置信息存储在一个Row key下， Row key由tablet所在的表的标识符和tablet的最后一行编码而成。
+    * <img src="NoSQL.assets/image-20230216001619636.png" alt="image-20230216001619636" style="zoom:80%;" />
+  * Bigtable使用Cache和Prefetch技术提高客户访问效率
+    * 子表的地址缓存在客户端
+    * 如果缓存信息过时或为空，客户需要进行Network Round-trip通信来寻址
+    * 说明：*客户端函数库会缓存Tablet位置信息。如果客户端不知道一个Tablet的位置信息，或者它发现，它所缓存的Tablet位置信息部正确，那么，它就会在Tablet位置层次结构中依次向上寻找。如果客户端缓存是空的，那么定位算法就需要进行三次轮询，其中就包括一次从Chubby中读取信息。如果客户端的缓存是过期的，定位算法就要进行六次轮询，因为，只有在访问无效的时候才会发现缓存中某个entry是过期的（这里假设METADATA Tablets不会频繁移动）。虽然，Tablets位置信息是保存在缓存中，从而不需要访问GFS，但是，我们仍然通过让客户端库函数预抓取tablet位置信息，来进一步减少代价，具体方法是：每次读取METADATA表时，都要读取至少两条以上的Tablet位置信息。 我们也在METADATA表中存储了二级信息，包括一个日志，它记载了和每个tablet有关的所有事件，比如，一个服务器什么时候开始提供这个tablet服务。这些信息对于性能分析和程序调试是非常有用的。*
+  * Tablet Assignment
+    * 每次、每个Tablet最多被分配到一个Tablet Server。Master Server跟踪运行的Tablet Server的状况，掌握当前Tablet被分配到Tablet Server的情况，记录哪个Tablet还没有被分配。
+    * 当一个Tablet没有被分配，并且一个Tablet Server空间足够，可以容纳该Tablet且可用时，Master server向这个Tablet Server发送一个tablet load请求，将Tablet分配给这个Tablet Server 。
+    * Chubby用于跟踪Tablet servers，Tablet server启动时请求互斥锁
+  * Tablet数据存储
+    * 较新的数据存储在Memtable的有序缓存中
+    * 较早的数据以SSTable格式存储在GFS中
+    * <img src="NoSQL.assets/image-20230216002104242.png" alt="image-20230216002104242" style="zoom:80%;" />
+  * Tablet数据读写操作
+    * WriteOp：需要先访问Chubby中保存的访问控制列表，确定用户的写权限，认证后有效的修改操作会记录在提交日志里。当写操作提交后，它的内容被插入到memtable
+    * ReadOp：需要先通过认证，然后合并内存表和SSTable表读数据。由于SSTable和memtable是字典排序的数据结构，合并视图的执行非常高效
+* BigTable的**性能优化**
+  * 局部群组化（Locality groups）
+    * 多个column family一起分组到一个locality group中。
+    * 为每个tablet中的每个locality group创建一个单独的SSTable。
+    * 通常不被一起访问的column family分割到不同的locality group，实现更高效的读。
+    * 一些有用的参数，可以针对每个locality group来设定。例如，一个locality group可以设置成存放在内存中。
+  * 压缩（Compression）
+    * 客户端可以决定是否对相应于某个locality group的SSTable进行压缩和压缩格式，自定义的压缩格式可以被应用到每个SSTable块中（块的尺寸可以采用与locality group相关的参数来进行控制）
+    * 许多客户端都使用“两段自定义压缩模式”。第一遍使用Bentley and McIlroy模式，它对一个大窗口内的长公共字符串进行压缩。第二遍使用一个快速的压缩算法，这个压缩算法在一个16KB数据量的窗口内寻找重复数据
+  * **改进读性能的缓存技术（Caching for read performance ）**
+    * tablet服务器使用两级缓存
+      * Scan Cache是高层次的缓存，它缓存了由tablet服务器代码的SSTable接口返回的key-value对。ScanCache对于那些频繁读取相同数据的应用来说非常有用
+      * BlockCache是低层次的缓存，它缓存了从GFS当中读取的SSTable块。Block缓存对于那些倾向于读取与自己最近读取数据临近的数据的应用来说，比较有用
+  * 布隆过滤器（Bloom filter）
+    * 一个读操作必须从构成一个tablet的当前状态的所有SSTable中读取数据
+    * 为减少磁盘访问，通过bloom过滤器可以查询一个SSTable是否包含了特定行/列对的数据
+    * 对于某些应用程序，只使用了少量的tablet服务器内存来存储Bloom过滤器，却大幅度减少了读操作需要的磁盘访问次数
+    * Bloom过滤器的使用也意味着对不存在的行或列的大多数查询不需要访问硬盘
+    * 说明：*Bloom filter：由 Howard Bloom 在 1970 年提出的二进制向量数据结构，它具有很好的空间和时间效率，被用来检测一个元素是不是集合中的一个成员。如果检测结果为是，该元素不一定在集合中；但如果检测结果为否，该元素一定不在集合中。 Bloom filter 采用的是哈希函数的方法，将一个元素映射到一个 m 长度的阵列上的一个点，当这个点是 1 时，那么这个元素在集合内，反之则不在集合内。这个方法的缺点就是当检测的元素很多的时候可能有冲突，解决方法就是使用 k个哈希 函数对应 k个点，如果所有点都是 1的话，那么元素在集合内，如果有 0 的话，元素则不在集合内。*
+
+
+
+# HBase
+
+随着发展，架构视角会变化
+
+<img src="NoSQL.assets/image-20230216213528076.png" alt="image-20230216213528076" style="zoom:80%;" />
+
+* HDFS（HadoopDistributedFileSystem，Hadoop 分布式文件系统）是 Hadoop 体系中数据存储管理的基础。
+* MapReduce 是一种“分而治之”的计算模型，用以进行大数据量的计算。
+* HBase是一个可伸缩、高可靠、高性能、分布式和面向列的动态模式数据库，采用Column-family数据模型组织数据。
+* Hive是数据仓库架构，它提供数据 ETL（抽取、转换和加载）工具、数据存储管理和大型数据集的查询和分析能力。
+* Pig 是对大型数据集进行分析和评估的平台，提供了一个高层次的、面向领域的抽象语言：PigLatin。
+* ZooKeeper 作为一个分布式的服务框架，解决了分布式计算中的一致性问题。
+* Mahout 提供一些可扩展的机器学习领域经典算法的实现，帮助开发人员更加方便快捷地创建智能应用程序，已经包含了聚类、分类、推荐引擎（协同过滤）和频繁集挖掘等广泛使用的数据挖掘方法。除了算法，Mahout 还包含数据的输入/输出工具、与其他存储系统（如数据库、MongoDB 或 Cassandra）集成等数据挖掘支持架构。
+* Flume 是 Cloudera 开发维护的分布式、可靠、高可用的海量日志收集系统。它将数据从产生、传输、处理并最终写入目标的路径的过程抽象为数据流。
+* Sqoop 是 SQL-to-Hadoop 的缩写，提供结构化数据存储与 Hadoop 之间进行数据交换，可以将一个关系型数据库（例如 MySQL、Oracle、PostgreSQL 等）中的数据导入 Hadoop 的 HDFS、Hive 中，也可以将 HDFS、Hive 中的数据导入关系型数据库中。整个数据导入导出过程都是用 MapReduce 实现并行化。
+* Avro 是一个数据序列化系统，设计用于支持大批量数据交换的应用。支持二进制序列化方式，可以便捷，快速地处理大量数据。Doug Cutting研发
+* Kafka 是由 Apache 软件基金会开发的一个开源流处理平台，由 Scala 和 Java编写。Kafka 是一种高吞吐量的分布式发布订阅消息系统，是通过 Hadoop 的并行加载机制来统一线上和离线的消息处理，也是为了通过集群来提供实时的消息。
+
+## HBASE数据模型
+
+* 在HBase中, 数据以表的形式存放
+  * 一个table有若干行，其中每列可以有多个版本
+  * 一行（row）由若干列组成，由row key确定存储，具有唯一性
+  * Column（列）是HBase最基本的单位
+  * 若干列形成column family（列族）。一个列族的所有列存储在同一个底层文件中：HFile
+  * 在每个cell存储不同的值
+  * 每一列的值或cell的值都有时间戳
+* 所有的行按row key字典序排序存储
+* 行数据的存取操作是原子的
+* <img src="NoSQL.assets/image-20230216214255253.png" alt="image-20230216214255253" style="zoom:80%;" />
+* HBase数据模型术语
+  * **Table**：一个HBase表由多行构成。
+  * **Row**：每行由一个row key和一个或多个具有值的列组成，并按照row key排序。
+  * **Column**：列由一个column family和 column qualifier组成, 用 冒号（:）字符分隔。
+  * **Column Family**：物理上，column family所有列及其值存储在一起，具有相同的前缀，一个column family的所有成员用相同的方式访问。
+  * **Column Qualifier**: column qualifier附加到column family，提供数据的索引。例如 content:html, content:pdf
+  * **Cell**: cell由row, column family, qualifier,存储的值以及timestamp表示，其中时间戳表示值的版本。
+  * <img src="NoSQL.assets/image-20230216214602219.png" alt="image-20230216214602219" style="zoom:80%;" />
+    <img src="NoSQL.assets/image-20230216214613203.png" alt="image-20230216214613203" style="zoom:80%;" />
+
+## 物理
+
+* **物理视图**-面向列族
+  * HBase按照列族分组，每个列族在硬盘上有自己的**HFile**格式文件集合，每个HFile格式文件都是独立管理，自身是二进制文件
+  * HBase的记录按照Key-value对存储以HFile格式存储，一个列族的数据物理上存放在一起
+  * <img src="NoSQL.assets/image-20230216214901552.png" alt="image-20230216214901552" style="zoom:80%;" />
+* **物理存储**
+  * Table中所有行按照row key的字典顺序排列
+  * Table横向分割为多个Region，每个Region的大小一定，当新的数据不断添加，会产生新的Region
+  * Region是HBASE分布式存储和负载均衡的最小单位，不同的Region可以分布在不同的Region Server上，但是一个Region不会拆分到多个Server上
+  * Region由一个或多个Store组成，每个Store保存一个Column Family，每个Store由一个memStore和0到多个StoreFile组成，StoreFile以HFile格式存储在HDFS上
+  * <img src="NoSQL.assets/image-20230216215007215.png" alt="image-20230216215007215" style="zoom:80%;" />
+    <img src="NoSQL.assets/image-20230216215023400.png" alt="image-20230216215023400" style="zoom:80%;" />
+    <img src="NoSQL.assets/image-20230216215043279.png" alt="image-20230216215043279" style="zoom:80%;" />
+
+## HFile
+
+* HFile组成
+  * Data Block：保存表中的数据，可以被压缩
+  * Meta Block（可选）：保存用户定义的Key-Value对，可以被压缩
+  * File Info: HFile的元信息，不压缩。用户可添加自己的元信息
+  * Data Block Index: Data Block的索引，每条索引记录的key是被索引block的第一条记录的key
+    * 读HFile时，DataBlock Index会读到内存，当检索某个Key时，只需在内存中查找key所在的block，不必扫描整个HFile。即通过一次I/O将整个Block读到内存。
+  * Meta Block Index（可选）：MetaBlock的索引
+  * Trailer:定长，保存每一部分的偏移量。读HFile时，首先读Trailer
+    * Trailer记录了每个部分的起始位置
+* <img src="NoSQL.assets/image-20230216215246809.png" alt="image-20230216215246809" style="zoom:80%;" />
+  <img src="NoSQL.assets/image-20230216215323353.png" alt="image-20230216215323353" style="zoom:80%;" />
+
+## HLog(Write Ahead Log)
+
+* WAL（Write Ahead Log）：预写日志，用作系统恢复。
+
+* HLog记录数据的所有修改
+
+* 每个Region Server维护一个HLog。不是每个Region维护一个HLog。 
+
+* HLog是Hadoop Sequence File形式
+
+  * Key: HLogKey对象，记录数据的所属的table ,Region以及sequence number和timestamp
+  * Value: HBase的Key Value对象，对应HFile的Key-value
+
+* 问题：为什么不是每个Region维护一个HLog，而是每个Region Server维护一个HLog？回放代价大吗？HLog和数据存放在一起吗？
+
+  * chatGPT: 
+    *在HBase中，每个Region Server维护一个HLog而不是每个Region维护一个HLog，主要是为了简化架构并提高性能。如果每个Region都维护一个HLog，那么需要在每个Region Server上打开多个HLog，这会增加管理成本和复杂性。而维护单个HLog使得管理更加简单。*
+
+    *此外，将HLog维护在Region Server级别还可以提高性能，因为在写入数据时，HBase只需要将数据写入Region Server上的HLog，而不需要为每个Region单独写入一份HLog，从而减少了磁盘I/O操作和降低了写入延迟。*
+
+    *在HBase中，HLog和数据不是存放在一起的。HLog存放在Region Server上的文件系统中，而数据存放在HDFS上。HBase使用HDFS来存储数据，并且将数据划分为多个Region，每个Region存储在HDFS上的一个或多个HFile中。*
+
+    *回放代价指的是从HLog中读取数据并将其应用于内存状态的成本。当Region Server崩溃并重新启动时，HBase需要从HLog中读取记录并将其应用于内存状态以重新构建Region Server的状态。这个过程称为“回放”，因为它涉及重新应用之前写入HLog的操作，以将内存状态恢复到其最新的已提交状态。*
+
+    *回放代价实际上是指在进行回放时需要的时间和资源成本。HBase的HLog是顺序写入的，因此回放过程通常比较快速。但是，回放代价也受到几个因素的影响，例如HLog的大小、回放期间Region Server的负载、HDFS的性能等等。*
+
+    *此外，回放代价也可以受到其他因素的影响，例如数据一致性、网络带宽等等。如果HLog记录的写操作涉及大量数据，则回放代价可能会更高。如果Region Server崩溃时的内存状态比较复杂，则需要更多的时间和资源来进行回放。*
+
+    *因此，为了最小化回放代价，可以采取一些措施，例如定期切换HLog、将HLog和数据存储在不同的物理磁盘上、使用高性能的硬件和网络等等。*
+
+## HBase系统架构
+
+* 客户端API
+
+  * 包括访问HBASE的接口，维护cache加快对HBASE的访问
+
+* Master（主服务器）
+
+  * 利用ZooKeeper为Region Server分配Region
+  * 负责Region Server的负载均衡
+  * 发现失效的Region Server，并重新分配Region Server
+  * 回收HDFS上的垃圾文件
+  * 处理Schema更新
+
+* Region Server
+
+  * 维护Master分配的Region，处理这些Region的I/O请求
+  * 负责切分运行过程中变大的Region
+
+* HBase组成
+  <img src="NoSQL.assets/image-20230217110313893.png" alt="image-20230217110313893" style="zoom:80%;" />
+  <img src="NoSQL.assets/image-20230217110321695.png" alt="image-20230217110321695" style="zoom:80%;" />
+
+* HBASE存储结构概览
+  <img src="NoSQL.assets/image-20230217110552547.png" alt="image-20230217110552547" style="zoom:80%;" />
+
+* | **HBase**         | **BigTable**       |
+  | ----------------- | ------------------ |
+  | Region            | Tablet             |
+  | RegionServer      | Tablet Server      |
+  | Flush             | Minor Compaction   |
+  | Minor  Compaction | Merging Compaction |
+  | Major Compaction  | Major  Compaction  |
+  | Write-Ahead Log   | Commit  Log        |
+  | HDFS              | GFS                |
+  | Hadoop MapReduce  | MapReduce          |
+  | MemStore          | Memtable           |
+  | HFile             | SSTable            |
+  | ZooKeeper         | Chubby             |
+
+* HBase的**访问接口**
+
+  * Native Java API: 最常规和高效的访问方式，适合Hadoop MapReduce Job并行批处理HBase表数据
+  * HBase Shell: HBase的命令行工具，最简单的接口，适合HBase管理使用
+  * Thrift Gateway，利用Thrift序列化技术，支持C++，PHP，Python等多种语言，适合其他异构系统在线访问HBase表数据
+  * REST Gateway：支持REST 风格的Http API访问HBase, 解除了语言限制
+  * Pig：可以使用Pig Latin流式编程语言来操作HBase中的数据，和Hive类似，本质最终也是编译成MapReduce Job来处理HBase表数据，适合做数据统计
+  * Hive: Hive 支持HBase，可以使用类似SQL语言来访问HBase
+
+* HBase**写路径**
+
+  * HBase接收到写请求，会将数据同时写入WAL和MemStore。当WAL和MemStore的写操作都完成，本次写操作完成
+
+  * 当MemStore写满之后，其中的数据刷写到磁盘，生成一个新的HFile
+
+  * <img src="NoSQL.assets/image-20230217112638917.png" alt="image-20230217112638917" style="zoom:80%;" />
+
+  * 问题：不写WAL，直接写MemStore，可以吗？会出什么问题吗？
+
+    * chatGPT：
+      *如果不写WAL，直接写入MemStore，那么将会存在数据的一致性和持久性问题。如果Region Server在写入MemStore之前崩溃，那么已经写入MemStore的数据将会丢失，并且无法从WAL中进行恢复。此外，如果Region Server在将数据写入磁盘之前崩溃，则数据也会丢失。*
+
+      *因此，不建议在HBase中不写WAL直接写入MemStore，因为这样会导致数据的不一致性和不可靠性。为了确保数据的一致性和可靠性，强烈建议启用WAL，并使用HBase的默认配置或者自定义配置，以确保数据在写入MemStore之前被写入WAL。*
+
+* HBase**读路径**
+
+  * HBase使用BlockCache优化读性能，采用LRU调度策略
+  * BlockCache中以block为单位存储数据
+  * 从HBase表中读一行数据时，首先检查MemStore中等待修改的数据队列，然后检查BlockCache查看包含该数据的block是否最近被访问过，最后访问硬盘上对应的HFile
+  * <img src="NoSQL.assets/image-20230217112946867.png" alt="image-20230217112946867" style="zoom:80%;" />
+
+* **合并(Compaction)**
+
+  * 随着MemStore的刷写，会产生多个HFile，如果文件数目达到阈值，就将它们合并成数量更少，更大的文件。这个过程持续进行，直到最大的文件超过配置规定的最大文件大小，触发Region拆分。
+  * 合并的种类，系统决定采用哪种合并
+    * Major compaction：将所有的文件压缩成一个文件
+    * Minor compaction：将多个小HFile合并成一个大HFile
+
+## Zookeeper
+
+* Zookeeper：分布式应用的协调服务，类似Chubby的分布式协调服务，实现统一命名服务、状态同步服务、集群管理、分布式锁和分布式应用配置管理等服务。
+  * 保证任何时候集群只有一个master
+  * 存储所有Region的寻址入口
+  * 实时监控Region的状态，将Region Server的信息实时通知给Master
+  * 存储Hbase的schema，包括表，每个表的Column Family
+* 有单机模式、伪集群模式和集群模式
+* 负责Master Server的选择（leader selection）
+* 实现跨域的共享锁
+  * 共享锁：又称为读锁。
+  * 需要获得锁的server创建一个临时顺序（EPHEMERAL_SEQUENTIAL）目录节点，调用getChildren方法获得当前目录节点列表中最小目录节点，判断是否是自己创建的目录节点，如果是，该server获得锁；如果不是，调用exists方法并监控Zookeeper上目录节点的变化，直到自己创建的节点是列表中最小编号的目录节点，获得锁。
+* Org.apache.zookeeper.Zookeeper类给出了zookeeper的常用访问方法
+* Zookeeper维护一个层次的数据结构，类似标准的文件系统
+  * <img src="NoSQL.assets/image-20230217113327916.png" alt="image-20230217113327916" style="zoom:80%;" />
+* 层次命名，例如/namespace/server1
+* 树中每个节点znode可以存储数据的多个版本
+
+
+
+# 分布式系统基础
+
+* 分布式系统含义：硬件或软件分布在联网的计算机上，组件之间通过消息传递通信和动作协调的系统。
+* 分布式系统的特征
+  * 并发性
+  * 缺乏全局时钟
+  * 故障独立性
+* 计算机网络无处不在，资源共享是构建分布式系统的主要动机
+* 分布式系统实例：Web search、Massive Multiplayer Online Game，MMOG（大型多人在线游戏）、WWW、云服务
+* 分布式系统面临的**挑战**
+  * 异构性：多样性和差异
+    * 网络、计算机硬件、操作系统、编程语言、不同开发者完成的软件实现等
+  * 开放性：增加新的资源共享服务和多种客户程序使用的程度
+    * 发布系统的关键接口
+    * 基于一致的通信机制和发布的接口访问**共享资源**
+    * 基于不同开发商提供的异构硬件和软件
+  * 安全性
+  * 可伸缩性
+  * 并发性
+  * 透明性：透明性对用户和应用隐藏了与当前任务无直接关系的资源，并能够匿名使用资源
+  * 故障处理
+    * 有些组件出现故障，有些组件运行正常
+    * 容错
+    * 故障恢复
+    * 冗余组件
+  * 服务质量（QoS），不同服务的质量要求不同
+    * SLA（Service-Level Agreement），服务等级协议，指的是系统服务提供者对客户的一个承诺。用来衡量一个分布式系统的好坏程度。
+    * 最常用的SLA指标：可用性、准确性、系统容量和延迟。
+
+* 分布式系统模型
+  * 物理模型：描述组成系统的计算机和设备的类型以及它们的互联，不涉及特定的技术细节。
+  * 体系结构模型：从系统的计算元素执行的**计算**和**通信**任务方面描述系统，其中计算元素可以是单个计算机也可以是通过网络互连的计算机集合。
+    * 例如Client-Server，Peer-to-Peer
+  * 基础模型：采用抽象的观点描述大多数分布式系统面临的单个问题的解决方案
+    * 交互模型：处理分布式系统的性能问题，并解决设置时间约束的难题（分布式系统没有全局时间）。
+    * 故障模型：进程和通信通道故障的精确描述，定义可靠的通信和正确的进程。
+    * 安全模型：描述进程和通信通道的各种可能的威胁。
+
+## 物理模型
+
+* 基线物理模型：一组可扩展的计算机节点，这些节点通过计算机网络相互连接进行所需的消息传递
+* 早期的分布式系统：通过局域网连接10~100个节点组成，与互联网的连接有限，单个系统是**同构**的，服务质量提供很少
+* 互联网规模的分布式系统：通过互联网连接，为全球化组织提供分布式系统服务，**异构性**突出
+* 当代的分布式系统：移动设备、嵌入式设备以及云计算促使异构性增加，节点数成千上万
+
+## 体系结构模型
+
+* 基本**体系结构元素**：
+  <img src="NoSQL.assets/image-20230221135530536.png" alt="image-20230221135530536" style="zoom:80%;" />
+
+  * **通信实体**（通信的对象）：
+    * 进程（线程）
+    * 面向问题的抽象，从编程的角度：对象、组件、web Service
+  * **通信范型**（如何通信）：
+    * 进程间通信
+    * 远程调用
+      * 远程过程调用（RPC）
+      * 远程方法调用（RMI）
+    * 间接通信
+      * 组通信
+      * 发布-订阅系统
+      * 消息队列
+      * 元组空间
+      * 分布式内存共享
+  * 角色和责任
+    * <img src="NoSQL.assets/image-20230221135642177.png" alt="image-20230221135642177" style="zoom:80%;" />
+    * Peer-to-Peer
+      * 所有参与的进程**运行相同的程序**，并且相互之间提供相同的接口集合
+      * 进程间通信依赖于对应用的需求。
+      * 共享数据对象，个体计算机只保存应用数据库的一小部分，存储、处理和通信的负载分不到联网的多个计算机上。
+      * 每个数据对象被复制到多个计算机上，一方面分散负载，另一方面提高数据可用性。
+      * 应用案例：Bittorrent
+      * <img src="NoSQL.assets/image-20230221135739960.png" alt="image-20230221135739960" style="zoom:80%;" />
+  * 放置（在物理基础设施的什么地方）
+    * 放置：解决对象和服务等实体与底层物理基础设施的映射问题。
+    * 从性能的角度考虑：
+      * 实体间的通信模式
+      * 给定计算机的可靠性和当前的负载
+      * 不同计算机之间的通信质量
+    * 放置策略
+      * 服务映射到多个服务器
+      * 缓存
+      * 移动代码
+      * 移动代理
+
+* **体系结构模式**：体系结构模式提供组合的、重复出现的结构，这些结构在一些给定的场景下表现良好
+
+* **Layering**（与抽象紧密相关）：
+
+  * 复杂系统被分成若干层，每层利用下层提供的服务。一个给定的层提供一个软件抽象，高层不了解其底层的实现细节以及其他更低的层
+
+  * platform：由最底层的硬件和软件层构成，这些层为上层提供服务，在每个计算机独立实现，提供系统API，便于进程间通信及协调。（PaaS）
+  * middleware：一个软件层，表示成一组计算机上的进程或对象，这些进程或对象相互交互，实现分布式应用的**通信和资源共享支持**，目的是屏蔽异构性，给程序员提供方便的编程接口。通过对抽象的支持，提升应用程序活动的层次。一些抽象包括远程方法调用、进程组织间的通信、事件的通知、共享数据共享数据的分区、放置和检索、共享数据的复制等
+  * <img src="NoSQL.assets/image-20230221141110317.png" alt="image-20230221141110317" style="zoom:80%;" />
+
+* **Tiered architecture**（更细节具体的分层）
+
+  * 对layering的补充，是在特定层组织功能、放置功能至合适的服务或物理节点的技术，与layering上层的应用和服务的组织最相关
+  * 两层模式：表示逻辑、应用逻辑和数据逻辑被分到客户进程和服务器进程，通常通过分割应用逻辑来完成划分。
+    * 一部分业务逻辑放在客户端，一部分放在服务器端
+    * 交互延迟低
+    * 应用逻辑分布到不同进程，导致有些功能不能直接被调用
+  * 三层模式：逻辑元素与物理服务器一一对应，每层都定义了明确的角色
+    * 软件可维护性高
+    * 增加了管理三个服务器的复杂性
+    * 可推广至多层方案
+  * <img src="NoSQL.assets/image-20230221143902414.png" alt="image-20230221143902414" style="zoom:80%;" />
+  * 表示逻辑：涉及用户交互和修改呈现给用户的应用视图
+    应用逻辑：涉及与应用相关的特定应用业务逻辑详细的处理
+    数据逻辑：涉及应用的持久存储，通常在一个数据库管理系统中
+
+* **Thin client**（瘦客户）
+
+  * 一个提供了基于窗口的本地用户界面的软件层，提供访问远程计算机的服务
+  * 客户设备的假设和需求小，可以访问复杂的网络服务
+  * 复杂性从最终用户设备移到互联网服务$\rightarrow$云计算
+  * <img src="NoSQL.assets/image-20230221144351277.png" alt="image-20230221144351277" style="zoom:80%;" />
+
+## 基础模型
+
+* 物理模型和体系结构模型共享一些基础特征
+  * 都由**进程**组成，这些进程在计算机网络上通过发送消息进行通信
+  * 共享设计需求：实现进程及网络性能的**可靠**性，确保系统资源的安全性
+* 基础模型包含分布式系统的基本组成，以便理解和推理系统的行为，目的是
+  * 显式地表达所建模的系统的相关假设
+  * 给定假设，归纳出哪些可能，那些不可能，比如了解设计依赖什么，不依赖什么
+* 分布式系统基础模型包含以下需要解决的问题
+  * 交互
+  * 故障
+  * 安全
+* **交互模型**
+  * 分布式系统中影响进程交互的两个重要因素
+    * **通信性能**通常是一限制特性
+    * 不可能维护单一的**全局时间**
+  * 通信通道的性能
+    * 通道的实现方式：可以是流或消息传递（TCP/IP、Socket）
+    * 计算机网络上的通信性能：延迟、带宽和抖动（jitter）
+      * 延迟：从一个进程开始发消息到另一个进程开始接受消息之间的间隔时间
+        带宽：给定时间内网络能传递的信息总量
+        抖动：传递一系列信息所花费的时间的变化值，与多媒体数据有关
+  * 计算机时钟和时序事件
+    * 分布式系统中每台计算机有自己的时钟，本地进程获取当前的时间值
+    * 不同计算机上运行的两个进程将时戳与事件关联，即使同时读时钟，各自本地时钟也提供不同的时间值
+    * 时钟漂移率：计算机时钟偏离绝对参考时钟的比率
+  * 交互模型的两个变体：同步分布式系统和异步分布式系统
+  * **同步分布式系统**（考！）
+    * 满足的约束
+      * 进程执行每一步的时间有一个上下限（响应要求，银行）
+      * 通过通道传递的每个消息在一个已知的时间范围内接收到
+      * 每个进程有一个本地时钟，时钟偏移率在一个已知的范围内
+    * 实际应用时，可以采用超时检测进程的故障
+  * **异步分布式系统**（考！）
+    * 对以下因素没有限制
+      * 进程执行速度
+      * 消息传递延迟
+      * 时钟漂移率
+    * 实际的分布式系统大多是异步的，如互联网
+* **故障模型**
+  * 分布式系统中，进程和通信通道都有可能出现故障
+  * 故障模型定义了故障可能发生的模式，从而理解故障的影响
+  * 故障分类
+    * Omission failure：进程或通信信道不能完成应该做的动作
+      * Process omission failure：进程崩溃、停止
+      * Communication omission failure：通信通道不能将消息从进程P的outgoing message buffer传递到进程Q的incoming message buffer，消息丢失
+      * <img src="NoSQL.assets/image-20230221150339195.png" alt="image-20230221150339195" style="zoom:80%;" />
+    * 随机故障（Byzantine拜占庭故障）：描述可能出现的最坏故障，任何类型的故障。
+      * 进程随机故障：进程随机地丢掉要做的步骤或执行一些不必要的处理步骤。
+      * 通信通道随机故障：消息丢失、损坏或多次传递等
+    * Timing failure：同步分布式系统中适用，在规定的时间间隔内，客户没有响应
+      * <img src="NoSQL.assets/image-20230221150711635.png" alt="image-20230221150711635" style="zoom:80%;" />
+    * Masking failure：分布式系统中的组件通常基于一组其他组件构造，利用存在故障的组件构造可靠的服务是可能的，例如数据多副本存储。
+* **安全模型**
+  * 分布式系统安全可以通过保证进程和用于进程交互的通道的安全，以及保护所封装的对象免遭未授权访问来实现。
+  * 其他内容参见“Distributed Systems: Concepts and Design”
