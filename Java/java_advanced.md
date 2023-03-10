@@ -5105,7 +5105,7 @@ public class Test {
     * 如何找到正确的类，如classpath路径的前后优先级
     * 如何避免恶意的类，如一个假的String类
     * 加载的顺序，如先加载父类，还是子类
-* 类加载器ClassI oader
+* 类加载器Class loader
   * 负责查找、加载、校验字节码的应用程序
   * java.lang.ClassLoader
     * load(String className)根据名字加载一个类，返回类的实例
@@ -5305,6 +5305,16 @@ JVM内存
   * 程序参数：程序可以读到，存储在main函数的形参数组中
   * 虚拟机参数：更改默认配置，用以指导进程运行
     * -X参数，不标准，不在所有VM通用；-XX参数，不稳定，容易变更
+  * **堆**(Heap)
+    * 共享，内存大户，存储所有的对象和数组
+    * Xms初始堆值，-Xmx最大堆值
+  * JVM**栈**(JVM Stack)
+    * 线程私有，存储类中每个方法的内容
+    * Xss最大栈值
+  * **方法区**(Method Area)
+    * 存储类信息、常量池等
+    * 1.7及以前，永久区(Perm)，-XX:PermSize，-XX:MaxPermSize
+    * 1.8及以后，元数据区，-XX:MetaspaceSize，-XX:MaxMetaspaceSize
 
 
 
