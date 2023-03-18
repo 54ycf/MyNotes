@@ -201,3 +201,148 @@ Java多线程实现对比
   * join， 等待另外一个线程结束.
   * interrupt,向另外一个线程发送中断信号，该线程收到信号，会
     触发InterruptedException(可解除阻塞)，并进行下一步处理
+
+看例子
+
+
+
+* 线程被动地暂停和终止（自己wait了靠别人notify来解脱自己）
+  * 依靠别的线程来拯救自己（比较危险，自己还拿着资源比如锁）
+  * 没有及时释放资源
+* **线程主动暂停和终止**
+  * 定期监测共享变量
+  * 如果需要暂停或者终止，先释放资源，再主动动作
+  * 暂停：Thread.sleep()，休眠
+  * 终止：run方法结束，线程终止
+
+看例子
+
+
+
+* 多线程死锁
+  * 每个线程互相持有别人需要的锁（哲学家吃面问题）
+  * 预防死锁，对资源进行等级排序
+* 守护(后台)线程
+  * 普通线程的结束，是run方法运行结束
+  * 守护线程的结束，是run方法运行结束，或main函数结束
+  * **守护线程永远不要访问资源**，如文件或数据库或锁等（来不及释放资源就结束）
+* 线程查看工具jvisualvm
+
+
+
+## Java并发框架Executor
+
+并行计算
+
+* 业务：任务多，数据量大
+* 串行 vs 并行
+  - 串行编程简单，并行编程困难一
+  - 单个计算核频率下降，计算核数增多，整体性能变高
+* 并行困难（任务分配和执行过程**高度耦合**）
+  * 如何控制粒度，切割任务
+  * 如何分配任务给线程，监督线程执行过程
+* 并行模式
+  * 主从模式(Master-Slave) ，主线程协调指挥从线程工作，更简单一些
+  * Worker模式(Worker-Worker)，P2P，平等，无中心
+* Java并发编程
+  * Thread/Runnable/Thread组管理
+  * Executor(本节重点)
+  * Fork-Join框架
+
+线程组管理
+
+* 线程组ThreadGroup
+  * 线程的集合
+  * 树形结构，大线程组可以包括小线程组
+  * 可以通过enumerate方法遍历组内的线程，执行操作
+  * 能够有效管理多个线程，但是**管理效率低**
+  * 任务分配和执行过程**高度耦合**
+  * 重复创建线程、关闭线程操作，**无法重用**线程。（只是提供数组方式来方便控制进程。线程和线程组内的线程，都是new产生出来，但是start一次以后，就不能再次使用，即再次start。new的代价很昂贵，只运行一次,性价比过低）
+
+看例子
+
+
+
+Executor
+
+* 从JDK 5开始提供Executor FrameWork (java.util.concurrent.*)
+  * 分离任务的创建和执行者的创建
+  * 线程重复利用(new线程代价很大)
+* 理解**共享线程池**的概念
+  * 预设好的多个Thread，可弹性增加
+  * 多次执行很多很小的任务
+  * 任务创建和执行过程解耦
+  * 程序员**无需关心线程池**执行任务过程
+* 主要类: ExecutorService，ThreadPoolExecutor，Future
+  * Executors.newCachedThreadPool / newFixedThreadPool创建线程池
+  * ExecutorService 线程池服务
+  * Callable 具体的逻辑对象(线程类)，Callable和Runnable是等价的，可以用来执行一个任务。Runnable的run方法没有返回值而Callable的call方法可以有返回值
+  * Future 返回结果
+
+看例子
+
+
+
+## Java并发框架Fork-Join
+
+* Java7 提供另一种并行框架：分解、治理、合并（**分治**编程）
+* 适合用于整体任务量不好确定的场合（**最小任务可确定**）
+* 关键类
+  * ForkjoinPool 任务池
+  * RecursiveAction
+  * RecursiveTask
+
+看例子
+
+
+
+## Java并发数据结构
+
+* 常用的数据结构是线程不安全的
+  * ArrayList, HashMap, HashSet 非同步的
+  * 多个线程同时读写，可能会抛出异常或数据错误
+* 传统Vector，Hashtable等支持同步的集合性能过差
+* 并发数据结构：数据添加和删除
+  * 阻塞式集合：当集合为空或者满时，等待
+  * 非阻塞式集合：当集合为空或者满时，不等待，返回null或异常
+* List
+  * Vector 同步安全，**写多读少**
+  * ArrayList 不安全
+  * Collections.synchronizedList(List list) 基于synchronized，效率差
+  * CopyOnWriteArrayList **读多写少**，基于复制机制，非阻塞，性能比较好
+* Set
+  * HashSet 不安全
+  * Collections.synchronizedSet(Set set) 基于synchronized，效率差
+  * CopyOnWriteArraySet，基于CopyOnWriteArrayList实现，**读多写少**非阻塞
+* Map
+  * Hashtable 同步安全，写多读少
+  * HashMap 不安全
+  * Collections.synchronizedMap(Map map) 基于synchronized，效率差
+  * ConcurrentHashMap 读多写少，非阻塞
+* Queue & Deque （队列，JDK 1.5 提出）
+  * ConcurrentLinkedQueue 非阻塞
+  * ArrayBlockingQueue / LinkedBlockingQueue 阻塞
+
+
+
+
+
+# Java并发协作控制
+
+* Thread/Executor/Fork-Join
+  * 线程启动，运行，结束
+  * 线程之间缺少协作
+* synchronized 同步
+  * 限定只有一个线程才能进入关键区
+  * 简单粗暴，性能损失有点大
+
+Lock
+
+* Lock也可以实现同步的效果
+  * 实现更复杂的临界区结构
+  * tryLock方法可以预判锁是否空闲
+  * 允许分离读写的操作，多个读，一个写
+  * 性能更好
+* Reentrantlock类，可重入的互斥锁。
+* ReentrantReadWriteLock类，可重入的读写锁
+* lock和unlock函数
